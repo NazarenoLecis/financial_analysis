@@ -1,11 +1,10 @@
 import numpy as np
 import pandas as pd
-import datetime as dt
-import yfinance as yf
-from scipy.optimize import minimize
-import matplotlib.pyplot as plt
+import yfinance as yf  # For fetching stock data
+import matplotlib.pyplot as plt  # For plotting results
+from datetime import datetime  # For handling dates
 
-# Fetch S&P 500 tickers dynamically
+# Fetch the list of S&P 500 companies from Wikipedia
 def fetch_sp500_tickers():
     """
     Fetch the list of S&P 500 companies from Wikipedia.
@@ -14,10 +13,10 @@ def fetch_sp500_tickers():
         list: A list of ticker symbols.
     """
     url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
-    sp500_table = pd.read_html(url)[0]
-    return sp500_table['Symbol'].tolist()
+    sp500_table = pd.read_html(url)[0]  # Use pandas to read the table
+    return sp500_table['Symbol'].tolist()  # Extract the 'Symbol' column as a list
 
-# Fetch adjusted closing prices for selected tickers
+# Fetch historical adjusted closing prices for a list of tickers
 def fetch_price_data(tickers, start_date, end_date):
     """
     Fetch historical adjusted closing prices for a list of tickers.
@@ -30,133 +29,152 @@ def fetch_price_data(tickers, start_date, end_date):
     Returns:
         DataFrame: Adjusted closing prices of the stocks.
     """
-    adj_close_df = pd.DataFrame()
+    adj_close_df = pd.DataFrame()  # Initialize an empty DataFrame
     for ticker in tickers:
         try:
             data = yf.download(ticker, start=start_date, end=end_date)
-            adj_close_df[ticker] = data['Adj Close']
+            adj_close_df[ticker] = data['Adj Close']  # Append 'Adj Close' to the DataFrame
         except Exception as e:
             print(f"Failed to fetch data for {ticker}: {e}")
     adj_close_df.dropna(axis=1, inplace=True)  # Drop columns with missing data
     return adj_close_df
 
-# Calculate portfolio metrics
-def calculate_log_returns(adj_close_df):
+# Monte Carlo simulation for portfolio optimization
+def simulate_portfolios(returns, mean_daily_returns, cov_matrix, num_portfolios=25000, risk_free_rate=0.02):
     """
-    Calculate log returns for a DataFrame of adjusted closing prices.
+    Simulate multiple portfolios to determine their returns, volatility, and Sharpe Ratio.
 
     Args:
-        adj_close_df (DataFrame): Adjusted closing prices.
+        returns (DataFrame): Daily returns of stocks.
+        mean_daily_returns (Series): Mean daily returns of stocks.
+        cov_matrix (DataFrame): Covariance matrix of returns.
+        num_portfolios (int): Number of portfolios to simulate.
+        risk_free_rate (float): Risk-free rate for Sharpe Ratio calculation.
 
     Returns:
-        DataFrame: Log returns of the stocks.
+        np.ndarray: Results of the simulation (returns, volatility, Sharpe Ratio, weights).
     """
-    return np.log(adj_close_df / adj_close_df.shift(1)).dropna()
+    num_stocks = len(mean_daily_returns)  # Number of stocks in the portfolio
+    results = np.zeros((3 + num_stocks, num_portfolios))  # Initialize results array
 
-def portfolio_std_dev(weights, cov_matrix):
-    variance = weights.T @ cov_matrix @ weights
-    return np.sqrt(variance)
+    # Monte Carlo Simulation:
+    # Randomly generate weights for stocks in the portfolio and calculate portfolio performance.
+    for i in range(num_portfolios):
+        weights = np.random.random(num_stocks)  # Generate random weights
+        weights /= np.sum(weights)  # Normalize weights to sum to 1
 
-def portfolio_expected_return(weights, log_returns):
-    return np.sum(log_returns.mean() * weights) * 252
+        # Portfolio annualized return = sum(weight * daily mean return * trading days)
+        portfolio_return = np.sum(mean_daily_returns * weights) * 252
 
-def portfolio_sharpe_ratio(weights, log_returns, cov_matrix, risk_free_rate):
-    return (portfolio_expected_return(weights, log_returns) - risk_free_rate) / portfolio_std_dev(weights, cov_matrix)
+        # Portfolio volatility = sqrt(weights^T * covariance matrix * weights) * sqrt(trading days)
+        portfolio_std_dev = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights))) * np.sqrt(252)
 
-# Select tickers dynamically based on criteria
-def select_tickers(adj_close_df, log_returns, method='low_volatility', top_n=10):
+        # Sharpe Ratio = (portfolio return - risk-free rate) / portfolio volatility
+        sharpe_ratio = (portfolio_return - risk_free_rate) / portfolio_std_dev
+
+        # Store results
+        results[0, i] = portfolio_return
+        results[1, i] = portfolio_std_dev
+        results[2, i] = sharpe_ratio
+        results[3:, i] = weights  # Store weights for this portfolio
+
+    return results
+
+# Convert simulation results into a DataFrame
+def results_to_dataframe(results, stocks):
     """
-    Select tickers dynamically based on specified criteria.
+    Convert simulation results into a DataFrame for easier analysis.
 
     Args:
-        adj_close_df (DataFrame): Adjusted closing prices.
-        log_returns (DataFrame): Log returns of the stocks.
-        method (str): Selection criteria ('low_volatility', 'high_return', 'random').
-        top_n (int): Number of tickers to select.
+        results (np.ndarray): Results of the Monte Carlo simulation.
+        stocks (list): List of stock tickers.
 
     Returns:
-        list: Selected tickers.
+        DataFrame: Results DataFrame with returns, volatility, Sharpe Ratio, and weights.
     """
-    if method == 'low_volatility':
-        volatility = log_returns.std() * np.sqrt(252)
-        selected_tickers = volatility.nsmallest(top_n).index.tolist()
-    elif method == 'high_return':
-        mean_returns = log_returns.mean() * 252
-        selected_tickers = mean_returns.nlargest(top_n).index.tolist()
-    elif method == 'random':
-        selected_tickers = adj_close_df.columns.to_list()
-        selected_tickers = np.random.choice(selected_tickers, top_n, replace=False).tolist()
-    else:
-        raise ValueError("Invalid selection method. Choose 'low_volatility', 'high_return', or 'random'.")
-    return selected_tickers
+    columns = ['ret', 'stdev', 'sharpe'] + stocks  # Columns for returns, volatility, Sharpe Ratio, and weights
+    return pd.DataFrame(results.T, columns=columns)
 
-# Optimize portfolio
-def optimize_portfolio(log_returns, cov_matrix, risk_free_rate, bounds=(0, 0.4)):
-    num_assets = len(log_returns.columns)
-    initial_weights = np.array([1 / num_assets] * num_assets)  # Equal weights initially
+# Identify portfolios with the highest Sharpe Ratio and minimum volatility
+def identify_optimal_portfolios(results_frame):
+    """
+    Identify the optimal portfolios: one with the maximum Sharpe Ratio and one with the minimum volatility.
 
-    # Constraints
-    constraints = {'type': 'eq', 'fun': lambda weights: np.sum(weights) - 1}  # Weights must sum to 1
-    bounds = [(bounds[0], bounds[1]) for _ in range(num_assets)]  # No short selling, max allocation per asset
+    Args:
+        results_frame (DataFrame): Results DataFrame.
 
-    # Perform optimization to maximize Sharpe Ratio
-    optimized_results = minimize(
-        lambda weights: -portfolio_sharpe_ratio(weights, log_returns, cov_matrix, risk_free_rate),
-        initial_weights,
-        method='SLSQP',
-        bounds=bounds,
-        constraints=constraints
-    )
+    Returns:
+        tuple: DataFrames for the maximum Sharpe Ratio and minimum volatility portfolios.
+    """
+    max_sharpe_port = results_frame.iloc[results_frame['sharpe'].idxmax()]
+    min_vol_port = results_frame.iloc[results_frame['stdev'].idxmin()]
+    return max_sharpe_port, min_vol_port
 
-    if not optimized_results.success:
-        raise ValueError("Optimization failed: " + optimized_results.message)
+# Plot portfolio results
+def plot_portfolios(results_frame, max_sharpe_port, min_vol_port):
+    """
+    Plot portfolios based on volatility and returns, with color indicating Sharpe Ratio.
 
-    return optimized_results.x
+    Args:
+        results_frame (DataFrame): Results DataFrame.
+        max_sharpe_port (DataFrame): Maximum Sharpe Ratio portfolio.
+        min_vol_port (DataFrame): Minimum volatility portfolio.
+    """
+    plt.scatter(results_frame.stdev, results_frame.ret, c=results_frame.sharpe, cmap='RdYlBu')
+    plt.xlabel('Volatility (Risk)')
+    plt.ylabel('Returns')
+    plt.colorbar(label='Sharpe Ratio')
+    plt.xlim(left=0)
+    plt.ylim(bottom=0)
 
-# Main program
+    # Highlight the maximum Sharpe Ratio portfolio
+    plt.scatter(max_sharpe_port['stdev'], max_sharpe_port['ret'], marker=(5, 1, 0), color='r', s=100, label='Max Sharpe Ratio')
+
+    # Highlight the minimum volatility portfolio
+    plt.scatter(min_vol_port['stdev'], min_vol_port['ret'], marker=(5, 1, 0), color='g', s=100, label='Min Volatility')
+
+    plt.legend()
+    plt.show()
+
+# Script execution starts here
 if __name__ == "__main__":
-    # Step 1: Fetch S&P 500 tickers
-    all_tickers = fetch_sp500_tickers()
+    # Step 1: Fetch S&P 500 stock tickers
+    sp500_tickers = fetch_sp500_tickers()
 
-    # Step 2: Fetch historical price data
-    end_date = dt.datetime.today()
-    start_date = end_date - dt.timedelta(days=5 * 365)  # 5 years of data
-    adj_close_df = fetch_price_data(all_tickers, start_date, end_date)
+    # Step 2: Allow the user to specify the number of stocks to include
+    try:
+        num_stocks = int(input("Enter the number of stocks for the portfolio (default 4): ") or 4)
+    except ValueError:
+        print("Invalid input. Using default of 4 stocks.")
+        num_stocks = 4
 
-    # Step 3: Calculate log returns
-    log_returns = calculate_log_returns(adj_close_df)
-    cov_matrix = log_returns.cov() * 252  # Annualized covariance matrix
-
-    # Step 4: Dynamically select top tickers (e.g., based on low volatility)
-    selected_tickers = select_tickers(adj_close_df, log_returns, method='low_volatility', top_n=10)
+    # Step 3: Randomly select stocks from the S&P 500
+    np.random.seed(42)
+    selected_tickers = np.random.choice(sp500_tickers, num_stocks, replace=False).tolist()
     print(f"Selected Tickers: {selected_tickers}")
 
-    # Filter data for selected tickers
-    log_returns = log_returns[selected_tickers]
-    cov_matrix = log_returns.cov() * 252
+    # Step 4: Fetch historical price data
+    start_date = '2010-01-01'
+    end_date = datetime.today().strftime('%Y-%m-%d')
+    data = fetch_price_data(selected_tickers, start_date, end_date)
 
-    # Step 5: Optimize portfolio
-    risk_free_rate = 0.02
-    optimal_weights = optimize_portfolio(log_returns, cov_matrix, risk_free_rate, bounds=(0, 0.4))
+    # Step 5: Calculate daily returns, mean returns, and covariance matrix
+    returns = data.pct_change()
+    mean_daily_returns = returns.mean()
+    cov_matrix = returns.cov()
 
-    # Calculate portfolio metrics
-    optimal_portfolio_return = portfolio_expected_return(optimal_weights, log_returns)
-    optimal_portfolio_volatility = portfolio_std_dev(optimal_weights, cov_matrix)
-    optimal_sharpe_ratio = portfolio_sharpe_ratio(optimal_weights, log_returns, cov_matrix, risk_free_rate)
+    # Step 6: Perform Monte Carlo simulation to generate portfolios
+    results = simulate_portfolios(returns, mean_daily_returns, cov_matrix)
+    results_frame = results_to_dataframe(results, selected_tickers)
 
-    # Step 6: Print and visualize results
-    print("\nOptimal Portfolio Weights:")
-    for ticker, weight in zip(selected_tickers, optimal_weights):
-        print(f"{ticker}: {weight:.4f}")
+    # Step 7: Identify optimal portfolios
+    max_sharpe_port, min_vol_port = identify_optimal_portfolios(results_frame)
 
-    print(f"\nExpected Annual Return: {optimal_portfolio_return:.4f}")
-    print(f"Expected Volatility: {optimal_portfolio_volatility:.4f}")
-    print(f"Sharpe Ratio: {optimal_sharpe_ratio:.4f}")
+    # Step 8: Display the results
+    print("\nPortfolio with Maximum Sharpe Ratio:")
+    print(max_sharpe_port)
+    print("\nPortfolio with Minimum Volatility:")
+    print(min_vol_port)
 
-    # Plot optimal weights
-    plt.figure(figsize=(10, 6))
-    plt.bar(selected_tickers, optimal_weights)
-    plt.xlabel('Assets')
-    plt.ylabel('Optimal Weights')
-    plt.title('Optimal Portfolio Weights')
-    plt.show()
+    # Step 9: Plot the portfolios
+    plot_portfolios(results_frame, max_sharpe_port, min_vol_port)
