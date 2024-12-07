@@ -1,6 +1,12 @@
 import yfinance as yf
 import pandas as pd
 
+# Fetch S&P 500 tickers
+def get_sp500_tickers():
+    table = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")
+    sp500_df = table[0]  # The first table contains the S&P 500 tickers
+    return sp500_df['Symbol'].tolist()
+
 # Fetch financial data for a given ticker
 def fetch_financial_data(ticker):
     stock = yf.Ticker(ticker)
@@ -12,15 +18,6 @@ def fetch_financial_data(ticker):
 
 # Calculate the Beneish M-Score for a given stock ticker
 def calculate_beneish_m_score(ticker):
-    """
-    Calculate the Beneish M-Score for a stock.
-
-    Args:
-        ticker (str): Stock ticker symbol.
-
-    Returns:
-        float: Beneish M-Score.
-    """
     try:
         data = fetch_financial_data(ticker)
         balance_sheet, income_statement, cash_flow, years = data
@@ -29,51 +26,59 @@ def calculate_beneish_m_score(ticker):
         if len(years) < 2:
             raise ValueError("Not enough financial data available")
 
-        # Beneish M-Score components calculation
+        # Helper functions
+        def safe_get(df, row, column, default=0):
+            try:
+                return df.loc[row, column]
+            except KeyError:
+                return default
+
+        def safe_divide(numerator, denominator):
+            return numerator / denominator if denominator != 0 else 0
 
         # DSRI: Days Sales in Receivables Index
-        receivables = balance_sheet.loc["Net Receivables", years[0]]
-        receivables_previous = balance_sheet.loc["Net Receivables", years[1]]
-        sales = income_statement.loc["Total Revenue", years[0]]
-        sales_previous = income_statement.loc["Total Revenue", years[1]]
-        dsri = (receivables / sales) / (receivables_previous / sales_previous)
+        receivables = safe_get(balance_sheet, "Accounts Receivable", years[0])
+        receivables_previous = safe_get(balance_sheet, "Accounts Receivable", years[1])
+        sales = safe_get(income_statement, "Total Revenue", years[0])
+        sales_previous = safe_get(income_statement, "Total Revenue", years[1])
+        dsri = safe_divide((receivables / sales), (receivables_previous / sales_previous))
 
         # GMI: Gross Margin Index
-        gross_margin = (income_statement.loc["Total Revenue", years[0]] - income_statement.loc["Cost Of Revenue", years[0]]) / income_statement.loc["Total Revenue", years[0]]
-        gross_margin_previous = (income_statement.loc["Total Revenue", years[1]] - income_statement.loc["Cost Of Revenue", years[1]]) / income_statement.loc["Total Revenue", years[1]]
-        gmi = gross_margin_previous / gross_margin
+        gross_margin = safe_divide((sales - safe_get(income_statement, "Cost Of Revenue", years[0])), sales)
+        gross_margin_previous = safe_divide((sales_previous - safe_get(income_statement, "Cost Of Revenue", years[1])), sales_previous)
+        gmi = safe_divide(gross_margin_previous, gross_margin)
 
         # AQI: Asset Quality Index
-        total_assets = balance_sheet.loc["Total Assets", years[0]]
-        total_assets_previous = balance_sheet.loc["Total Assets", years[1]]
-        current_assets = balance_sheet.loc.get("Total Current Assets", balance_sheet.loc["Current Assets", years[0]])
-        current_assets_previous = balance_sheet.loc.get("Total Current Assets", balance_sheet.loc["Current Assets", years[1]])
-        ppe = balance_sheet.loc.get("Property Plant Equipment", balance_sheet.loc["Net PPE", years[0]])
-        ppe_previous = balance_sheet.loc.get("Property Plant Equipment", balance_sheet.loc["Net PPE", years[1]])
-        aqi = (1 - (current_assets + ppe) / total_assets) / (1 - (current_assets_previous + ppe_previous) / total_assets_previous)
+        total_assets = safe_get(balance_sheet, "Total Assets", years[0])
+        total_assets_previous = safe_get(balance_sheet, "Total Assets", years[1])
+        current_assets = safe_get(balance_sheet, "Current Assets", years[0])
+        current_assets_previous = safe_get(balance_sheet, "Current Assets", years[1])
+        ppe = safe_get(balance_sheet, "Net PPE", years[0])
+        ppe_previous = safe_get(balance_sheet, "Net PPE", years[1])
+        aqi = safe_divide((1 - (current_assets + ppe) / total_assets), (1 - (current_assets_previous + ppe_previous) / total_assets_previous))
 
         # SGI: Sales Growth Index
-        sgi = sales / sales_previous
+        sgi = safe_divide(sales, sales_previous)
 
         # DEPI: Depreciation Index
-        depreciation = income_statement.loc.get("Depreciation", income_statement.loc["Depreciation Amortization", years[0]])
-        depreciation_previous = income_statement.loc.get("Depreciation", income_statement.loc["Depreciation Amortization", years[1]])
-        depi = (depreciation_previous / (depreciation_previous + ppe_previous)) / (depreciation / (depreciation + ppe))
+        depreciation = safe_get(income_statement, "Depreciation", years[0])
+        depreciation_previous = safe_get(income_statement, "Depreciation", years[1])
+        depi = safe_divide((depreciation_previous / (depreciation_previous + ppe_previous)), (depreciation / (depreciation + ppe)))
 
         # SGAI: Sales, General, and Administrative Expenses Index
-        sga_expense = income_statement.loc.get("Selling General Administrative", income_statement.loc["SGA Expense", years[0]])
-        sga_expense_previous = income_statement.loc.get("Selling General Administrative", income_statement.loc["SGA Expense", years[1]])
-        sgai = (sga_expense / sales) / (sga_expense_previous / sales_previous)
+        sga_expense = safe_get(income_statement, "Selling General Administrative", years[0])
+        sga_expense_previous = safe_get(income_statement, "Selling General Administrative", years[1])
+        sgai = safe_divide((sga_expense / sales), (sga_expense_previous / sales_previous))
 
         # LVGI: Leverage Index
-        total_liabilities = balance_sheet.loc["Total Liabilities Net Minority Interest", years[0]]
-        total_liabilities_previous = balance_sheet.loc["Total Liabilities Net Minority Interest", years[1]]
-        lvgi = (total_liabilities / total_assets) / (total_liabilities_previous / total_assets_previous)
+        total_liabilities = safe_get(balance_sheet, "Total Liabilities Net Minority Interest", years[0])
+        total_liabilities_previous = safe_get(balance_sheet, "Total Liabilities Net Minority Interest", years[1])
+        lvgi = safe_divide((total_liabilities / total_assets), (total_liabilities_previous / total_assets_previous))
 
         # TATA: Total Accruals to Total Assets
-        net_income = income_statement.loc["Net Income", years[0]]
-        cash_flow_operations = cash_flow.loc["Total Cash From Operating Activities", years[0]]
-        tata = (net_income - cash_flow_operations) / total_assets
+        net_income = safe_get(income_statement, "Net Income", years[0])
+        cash_flow_operations = safe_get(cash_flow, "Total Cash From Operating Activities", years[0])
+        tata = safe_divide((net_income - cash_flow_operations), total_assets)
 
         # Beneish M-Score calculation
         m_score = -4.84 + 0.92 * dsri + 0.528 * gmi + 0.404 * aqi + 0.892 * sgi + 0.115 * depi - 0.172 * sgai + 4.679 * tata - 0.327 * lvgi
@@ -81,13 +86,21 @@ def calculate_beneish_m_score(ticker):
         return m_score
 
     except Exception as e:
-        print(f"Failed to calculate the Beneish M-Score for {ticker}: {e}")
-        return None
+        raise RuntimeError(f"Failed to calculate M-Score for {ticker}: {e}")
 
-# Example usage
-ticker = "AAPL"  # Replace with the desired stock ticker
-m_score = calculate_beneish_m_score(ticker)
-if m_score is not None:
-    print(f"The Beneish M-Score for {ticker} is {m_score}")
-else:
-    print(f"Could not calculate the Beneish M-Score for {ticker}")
+# Fetch the list of S&P 500 companies and calculate Beneish M-Score for each
+sp500_tickers = get_sp500_tickers()
+errors = {}
+
+for ticker in sp500_tickers:
+    try:
+        m_score = calculate_beneish_m_score(ticker)
+        print(f"The Beneish M-Score for {ticker} is {m_score}")
+    except Exception as e:
+        errors[ticker] = str(e)
+        print(f"Error for {ticker}: {e}")
+
+# Print errors summary
+print("\nErrors Summary:")
+for ticker, error_message in errors.items():
+    print(f"{ticker}: {error_message}")
