@@ -18,7 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from utils import fetch_price_history, yahoo_symbol
+from utils import RichHelpFormatter, fetch_price_history, yahoo_symbol
 
 
 def calculate_dividend_history(ticker: str, cagr_years: int = 5) -> tuple[pd.DataFrame, dict[str, float]]:
@@ -101,12 +101,30 @@ def plot_dividends(ticker: str, annual: pd.DataFrame) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Analyze dividend history for one ticker.")
+    parser = argparse.ArgumentParser(
+        description="Analyze dividend history, yield, and recent dividend CAGR.",
+        formatter_class=RichHelpFormatter,
+        epilog="""
+Inputs:
+  --ticker accepts one Yahoo Finance symbol, e.g. AAPL.
+  --cagr-years controls the recent completed-year dividend growth window.
+
+Data used:
+  This script uses yfinance's dividend time series, groups payments by calendar
+  year, excludes the incomplete current year from CAGR, and calculates current
+  yield using trailing 12-month dividends divided by the latest close price.
+
+Examples:
+  python fundamental_analysis/dividend_analysis.py
+  python fundamental_analysis/dividend_analysis.py --ticker KO --cagr-years 10
+  python fundamental_analysis/dividend_analysis.py --ticker MSFT --no-plot
+""",
+    )
 
     # Defaults make this script work by pressing Run Python File in VS Code.
-    parser.add_argument("--ticker", default="AAPL")
-    parser.add_argument("--cagr-years", type=int, default=5)
-    parser.add_argument("--no-plot", action="store_true")
+    parser.add_argument("--ticker", default="AAPL", help="Yahoo Finance ticker symbol.")
+    parser.add_argument("--cagr-years", type=int, default=5, help="Number of recent completed years used for dividend CAGR.")
+    parser.add_argument("--no-plot", action="store_true", help="Print output only and do not open a matplotlib chart.")
     return parser.parse_args()
 
 

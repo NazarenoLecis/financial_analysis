@@ -17,7 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from utils import fetch_financial_data, fetch_index_tickers, require_periods, safe_divide, statement_value
+from utils import RichHelpFormatter, fetch_financial_data, fetch_index_tickers, require_periods, safe_divide, statement_value
 
 
 def calculate_profitability(data) -> int:
@@ -166,10 +166,32 @@ def calculate_piotroski_score(ticker: str) -> int:
 def parse_args() -> argparse.Namespace:
     """Parse command-line options for batch or single-ticker scoring."""
 
-    parser = argparse.ArgumentParser(description="Calculate Piotroski F-scores.")
-    parser.add_argument("--index", choices=["sp500", "nasdaq100"], default="sp500")
-    parser.add_argument("--tickers", nargs="+", help="Ticker symbols to analyze. Overrides --index.")
-    parser.add_argument("--limit", type=int, help="Limit the number of tickers processed.")
+    parser = argparse.ArgumentParser(
+        description="Calculate Piotroski F-scores from annual financial statements.",
+        formatter_class=RichHelpFormatter,
+        epilog="""
+Inputs:
+  --tickers accepts Yahoo Finance ticker symbols such as AAPL, MSFT, NVDA.
+  --index accepts one of: sp500, nasdaq100. Constituents are scraped from Wikipedia.
+  --limit is useful for small test batches.
+
+Data used:
+  This script uses the latest three annual periods because some signals compare
+  current and prior-year average assets.
+
+Interpretation:
+  Score range is 0 to 9. Higher values generally indicate stronger fundamental
+  quality, but the score is a checklist, not a valuation model.
+
+Examples:
+  python fundamental_analysis/Piotroski_Fscore.py
+  python fundamental_analysis/Piotroski_Fscore.py --tickers AAPL MSFT
+  python fundamental_analysis/Piotroski_Fscore.py --index nasdaq100 --limit 10
+""",
+    )
+    parser.add_argument("--index", choices=["sp500", "nasdaq100"], default="sp500", help="Index universe to use when running in index mode.")
+    parser.add_argument("--tickers", nargs="+", help="One or more Yahoo Finance ticker symbols. Overrides --index.")
+    parser.add_argument("--limit", type=int, help="Maximum number of index tickers to process.")
     return parser.parse_args()
 
 

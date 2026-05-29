@@ -9,6 +9,7 @@ focus on the finance logic. The helpers here handle practical details such as:
 - preventing silent division-by-zero mistakes in financial ratios.
 """
 
+import argparse
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -26,6 +27,14 @@ INDEX_URLS = {
     "sp500": "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
     "nasdaq100": "https://en.wikipedia.org/wiki/Nasdaq-100",
 }
+
+
+class RichHelpFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
+    """Argparse formatter that shows defaults and preserves readable examples.
+
+    Scripts use this so `python script.py --help` explains accepted variables,
+    parameter formats, possible values, and practical examples.
+    """
 
 
 @dataclass(frozen=True)

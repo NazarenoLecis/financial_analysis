@@ -21,7 +21,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from utils import MissingFinancialField, fetch_financial_data, safe_divide, statement_value
+from utils import MissingFinancialField, RichHelpFormatter, fetch_financial_data, safe_divide, statement_value
 
 
 def calculate_dupont(ticker: str) -> pd.DataFrame:
@@ -93,11 +93,30 @@ def plot_dupont(ticker: str, frame: pd.DataFrame) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run a DuPont ROE decomposition.")
+    parser = argparse.ArgumentParser(
+        description="Run a DuPont return-on-equity decomposition by fiscal year.",
+        formatter_class=RichHelpFormatter,
+        epilog="""
+Inputs:
+  --ticker accepts one Yahoo Finance symbol, e.g. AAPL.
+
+Data used:
+  This is a time-series script. It uses all complete annual periods available
+  from yfinance and skips incomplete statement years.
+
+Output:
+  net_margin * asset_turnover * equity_multiplier = ROE
+
+Examples:
+  python fundamental_analysis/dupont_analysis.py
+  python fundamental_analysis/dupont_analysis.py --ticker MSFT
+  python fundamental_analysis/dupont_analysis.py --ticker AAPL --no-plot
+""",
+    )
 
     # Defaults make this script runnable by pressing Run Python File in VS Code.
-    parser.add_argument("--ticker", default="AAPL")
-    parser.add_argument("--no-plot", action="store_true")
+    parser.add_argument("--ticker", default="AAPL", help="Yahoo Finance ticker symbol.")
+    parser.add_argument("--no-plot", action="store_true", help="Print output only and do not open a matplotlib chart.")
     return parser.parse_args()
 
 

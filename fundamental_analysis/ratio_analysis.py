@@ -20,7 +20,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from utils import fetch_financial_data, fetch_index_tickers, market_cap_from_stock, safe_divide, statement_value
+from utils import RichHelpFormatter, fetch_financial_data, fetch_index_tickers, market_cap_from_stock, safe_divide, statement_value
 
 
 def calculate_ratios(ticker: str) -> dict[str, float | str]:
@@ -105,10 +105,28 @@ def plot_ratios(results: pd.DataFrame) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Calculate fundamental ratios for one or more tickers.")
-    parser.add_argument("--index", choices=["sp500", "nasdaq100"], default="sp500")
-    parser.add_argument("--tickers", nargs="+", help="Ticker symbols to analyze. Overrides --index.")
-    parser.add_argument("--limit", type=int, help="Limit the number of index tickers processed.")
+    parser = argparse.ArgumentParser(
+        description="Calculate liquidity, leverage, profitability, efficiency, and valuation ratios.",
+        formatter_class=RichHelpFormatter,
+        epilog="""
+Inputs:
+  --tickers accepts one or more Yahoo Finance symbols, e.g. AAPL MSFT NVDA.
+  --index accepts one of: sp500, nasdaq100.
+  --plot opens a comparison chart with matplotlib.
+
+Data used:
+  Ratios use the latest available annual financial statements plus current
+  market capitalization from yfinance.
+
+Examples:
+  python fundamental_analysis/ratio_analysis.py
+  python fundamental_analysis/ratio_analysis.py --tickers AAPL MSFT NVDA --plot
+  python fundamental_analysis/ratio_analysis.py --index sp500 --limit 5
+""",
+    )
+    parser.add_argument("--index", choices=["sp500", "nasdaq100"], default="sp500", help="Index universe to use when running in index mode.")
+    parser.add_argument("--tickers", nargs="+", help="One or more Yahoo Finance ticker symbols. Overrides --index.")
+    parser.add_argument("--limit", type=int, help="Maximum number of index tickers to process.")
     parser.add_argument("--plot", action="store_true", help="Show a matplotlib ratio comparison chart.")
     return parser.parse_args()
 

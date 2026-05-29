@@ -27,7 +27,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from utils import extract_close_prices, fetch_index_tickers, yahoo_symbol
+from utils import RichHelpFormatter, extract_close_prices, fetch_index_tickers, yahoo_symbol
 
 
 def run_simulation(
@@ -122,18 +122,41 @@ def plot_results(results: pd.DataFrame) -> None:
 def parse_args() -> argparse.Namespace:
     """Parse command-line options for reproducible portfolio simulations."""
 
-    parser = argparse.ArgumentParser(description="Run a Monte Carlo portfolio simulation.")
+    parser = argparse.ArgumentParser(
+        description="Run a Monte Carlo simulation of random long-only stock portfolios.",
+        formatter_class=RichHelpFormatter,
+        epilog="""
+Inputs:
+  --tickers accepts one or more Yahoo Finance symbols, e.g. AAPL MSFT NVDA.
+  --index accepts one of: sp500, nasdaq100, and randomly selects --num-stocks.
+  --start-date and --end-date use YYYY-MM-DD format.
+  --risk-free-rate is a decimal, so 0.02 means 2 percent.
+
+Data used:
+  This is a price time-series model. It uses historical daily close prices,
+  daily returns, and the covariance matrix of returns.
+
+Output:
+  The table shows the random portfolio with maximum Sharpe ratio and the random
+  portfolio with minimum volatility. Weights show the allocation to each stock.
+
+Examples:
+  python portfolio_analysis/Monte_Carlo_simulation.py
+  python portfolio_analysis/Monte_Carlo_simulation.py --tickers AAPL MSFT NVDA GOOGL --simulations 1000
+  python portfolio_analysis/Monte_Carlo_simulation.py --index sp500 --num-stocks 5 --seed 7 --no-plot
+""",
+    )
 
     # Defaults make this script runnable from VS Code without arguments.
-    parser.add_argument("--index", choices=["sp500", "nasdaq100"], default="sp500")
-    parser.add_argument("--tickers", nargs="+", help="Ticker symbols to analyze. Overrides random selection.")
-    parser.add_argument("--num-stocks", type=int, default=4, help="Random stock count when --tickers is omitted.")
-    parser.add_argument("--start-date", default="2010-01-01")
-    parser.add_argument("--end-date", default=datetime.today().strftime("%Y-%m-%d"))
-    parser.add_argument("--simulations", type=int, default=25000)
-    parser.add_argument("--risk-free-rate", type=float, default=0.0)
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--no-plot", action="store_true")
+    parser.add_argument("--index", choices=["sp500", "nasdaq100"], default="sp500", help="Index universe used when --index is explicitly passed.")
+    parser.add_argument("--tickers", nargs="+", help="One or more Yahoo Finance ticker symbols. Overrides random index selection.")
+    parser.add_argument("--num-stocks", type=int, default=4, help="Number of stocks to randomly select when using --index.")
+    parser.add_argument("--start-date", default="2010-01-01", help="Start date for price history, in YYYY-MM-DD format.")
+    parser.add_argument("--end-date", default=datetime.today().strftime("%Y-%m-%d"), help="End date for price history, in YYYY-MM-DD format.")
+    parser.add_argument("--simulations", type=int, default=25000, help="Number of random portfolios to simulate.")
+    parser.add_argument("--risk-free-rate", type=float, default=0.0, help="Annual risk-free rate used in Sharpe ratio, as a decimal.")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducible simulations.")
+    parser.add_argument("--no-plot", action="store_true", help="Print output only and do not open a matplotlib chart.")
     return parser.parse_args()
 
 

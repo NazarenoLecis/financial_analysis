@@ -30,7 +30,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from utils import fetch_financial_data, safe_divide, statement_series, statement_value
+from utils import RichHelpFormatter, fetch_financial_data, safe_divide, statement_series, statement_value
 
 
 BALANCE_SHEET_FIELDS = {
@@ -180,12 +180,33 @@ def plot_balance_sheet(ticker: str, history: pd.DataFrame, years: int) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Summarize the latest balance sheet for a public company.")
+    parser = argparse.ArgumentParser(
+        description="Summarize the latest balance sheet and recent balance-sheet history.",
+        formatter_class=RichHelpFormatter,
+        epilog="""
+Inputs:
+  --ticker accepts one Yahoo Finance symbol, e.g. AAPL.
+  --years controls how many recent annual periods are printed and plotted.
+
+Data used:
+  The first table uses the latest available annual balance sheet.
+  The history table and chart use a time series of annual balance-sheet values.
+
+Field names:
+  yfinance labels vary by company. This script uses aliases for common fields
+  such as Total Assets, Total Liabilities, Total Debt, and Stockholders Equity.
+
+Examples:
+  python quick_views/balance_sheet_summary.py
+  python quick_views/balance_sheet_summary.py --ticker MSFT --years 5
+  python quick_views/balance_sheet_summary.py --ticker AAPL --no-plot
+""",
+    )
 
     # Defaults make the script useful by simply pressing Run Python File in VS Code.
-    parser.add_argument("--ticker", default="AAPL")
-    parser.add_argument("--years", type=int, default=4)
-    parser.add_argument("--no-plot", action="store_true")
+    parser.add_argument("--ticker", default="AAPL", help="Yahoo Finance ticker symbol.")
+    parser.add_argument("--years", type=int, default=4, help="Number of recent annual periods to print and plot.")
+    parser.add_argument("--no-plot", action="store_true", help="Print output only and do not open a matplotlib chart.")
     return parser.parse_args()
 
 

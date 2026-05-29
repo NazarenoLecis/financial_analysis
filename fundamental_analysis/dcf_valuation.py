@@ -27,6 +27,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from utils import (
+    RichHelpFormatter,
     fetch_financial_data,
     market_cap_from_stock,
     safe_divide,
@@ -126,15 +127,37 @@ def plot_dcf(ticker: str, projection: pd.DataFrame) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run a simple discounted cash flow valuation.")
+    parser = argparse.ArgumentParser(
+        description="Run a simple discounted cash flow valuation.",
+        formatter_class=RichHelpFormatter,
+        epilog="""
+Inputs:
+  --ticker accepts one Yahoo Finance symbol, e.g. AAPL.
+  Rates are decimals, not percentages. Use 0.05 for 5 percent.
+  --years is the number of explicit forecast years before terminal value.
+
+Data used:
+  The model starts from the latest annual free cash flow. It then projects a
+  future time series using your assumptions.
+
+Important:
+  terminal-growth-rate must be lower than discount-rate.
+  This simplified model does not separately adjust for net debt.
+
+Examples:
+  python fundamental_analysis/dcf_valuation.py
+  python fundamental_analysis/dcf_valuation.py --ticker MSFT --growth-rate 0.06 --discount-rate 0.09
+  python fundamental_analysis/dcf_valuation.py --ticker AAPL --years 10 --terminal-growth-rate 0.025
+""",
+    )
 
     # Defaults make the script runnable from VS Code without arguments.
-    parser.add_argument("--ticker", default="AAPL")
-    parser.add_argument("--growth-rate", type=float, default=0.05)
-    parser.add_argument("--discount-rate", type=float, default=0.10)
-    parser.add_argument("--terminal-growth-rate", type=float, default=0.025)
-    parser.add_argument("--years", type=int, default=5)
-    parser.add_argument("--no-plot", action="store_true")
+    parser.add_argument("--ticker", default="AAPL", help="Yahoo Finance ticker symbol.")
+    parser.add_argument("--growth-rate", type=float, default=0.05, help="Annual free-cash-flow growth assumption, as a decimal.")
+    parser.add_argument("--discount-rate", type=float, default=0.10, help="Discount rate used to present-value future cash flows, as a decimal.")
+    parser.add_argument("--terminal-growth-rate", type=float, default=0.025, help="Long-term growth rate after the forecast period, as a decimal.")
+    parser.add_argument("--years", type=int, default=5, help="Number of explicit forecast years.")
+    parser.add_argument("--no-plot", action="store_true", help="Print output only and do not open a matplotlib chart.")
     return parser.parse_args()
 
 

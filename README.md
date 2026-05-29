@@ -48,6 +48,18 @@ Every runnable script has defaults, so pressing "Run Python File" in VS Code wor
 
 Use the command-line options below when you want different tickers, index samples, dates, assumptions, or no chart window.
 
+## Command Help
+
+Every runnable script has detailed command-line help:
+
+```powershell
+python technical_analysis/rsi_analysis.py --help
+python quick_views/stock_snapshot.py --help
+python portfolio_analysis/portfolio_optimization.py --help
+```
+
+The help text explains accepted variables, possible values, defaults, date formats, examples, and whether the script uses latest financial statement values or historical time-series data.
+
 ## Quick Views
 
 These scripts are for fast inspection rather than deeper modelling.

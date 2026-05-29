@@ -21,7 +21,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from technical_analysis.indicators import relative_strength_index
-from utils import fetch_price_history
+from utils import RichHelpFormatter, fetch_price_history
 
 
 def analyze_rsi(ticker: str, start_date: str, end_date: str | None, window: int):
@@ -68,14 +68,36 @@ def plot_rsi(ticker: str, analysis) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Calculate and chart RSI.")
+    parser = argparse.ArgumentParser(
+        description="Calculate and chart the Relative Strength Index.",
+        formatter_class=RichHelpFormatter,
+        epilog="""
+Inputs:
+  --ticker accepts one Yahoo Finance symbol, e.g. AAPL.
+  --start-date and --end-date use YYYY-MM-DD format.
+  --window is the number of trading days used for average gains/losses.
+
+Data used:
+  This is a price time-series script. It uses daily close prices from yfinance.
+
+Interpretation:
+  RSI >= 70 is labelled overbought.
+  RSI <= 30 is labelled oversold.
+  Values between 30 and 70 are labelled neutral.
+
+Examples:
+  python technical_analysis/rsi_analysis.py
+  python technical_analysis/rsi_analysis.py --ticker MSFT --window 14
+  python technical_analysis/rsi_analysis.py --ticker AAPL --start-date 2023-01-01 --no-plot
+""",
+    )
 
     # Defaults make the script work from VS Code with no arguments.
-    parser.add_argument("--ticker", default="AAPL")
-    parser.add_argument("--start-date", default="2020-01-01")
-    parser.add_argument("--end-date")
-    parser.add_argument("--window", type=int, default=14)
-    parser.add_argument("--no-plot", action="store_true")
+    parser.add_argument("--ticker", default="AAPL", help="Yahoo Finance ticker symbol.")
+    parser.add_argument("--start-date", default="2020-01-01", help="Start date for price history, in YYYY-MM-DD format.")
+    parser.add_argument("--end-date", help="Optional end date for price history, in YYYY-MM-DD format.")
+    parser.add_argument("--window", type=int, default=14, help="Rolling window for RSI gains/losses.")
+    parser.add_argument("--no-plot", action="store_true", help="Print output only and do not open a matplotlib chart.")
     return parser.parse_args()
 
 

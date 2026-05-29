@@ -17,7 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from utils import fetch_financial_data, fetch_index_tickers, require_periods, safe_divide, statement_value
+from utils import RichHelpFormatter, fetch_financial_data, fetch_index_tickers, require_periods, safe_divide, statement_value
 
 
 def calculate_beneish_m_score(ticker: str) -> float:
@@ -169,10 +169,32 @@ def depreciation_value(data, period) -> float:
 def parse_args() -> argparse.Namespace:
     """Parse command-line options for batch or single-ticker scoring."""
 
-    parser = argparse.ArgumentParser(description="Calculate Beneish M-scores.")
-    parser.add_argument("--index", choices=["sp500", "nasdaq100"], default="sp500")
-    parser.add_argument("--tickers", nargs="+", help="Ticker symbols to analyze. Overrides --index.")
-    parser.add_argument("--limit", type=int, help="Limit the number of tickers processed.")
+    parser = argparse.ArgumentParser(
+        description="Calculate Beneish M-scores for possible earnings-manipulation risk.",
+        formatter_class=RichHelpFormatter,
+        epilog="""
+Inputs:
+  --tickers accepts Yahoo Finance ticker symbols such as AAPL, MSFT, NVDA.
+  --index accepts one of: sp500, nasdaq100. Constituents are scraped from Wikipedia.
+  --limit is useful for small test batches.
+
+Data used:
+  This script compares the latest annual period with the prior annual period.
+  It is a two-period comparison, not a full time-series chart.
+
+Interpretation:
+  A common threshold is about -1.78. Scores above that level are often treated
+  as higher manipulation-risk signals, but the score is only a screening tool.
+
+Examples:
+  python fundamental_analysis/Beneish_Mscore.py
+  python fundamental_analysis/Beneish_Mscore.py --tickers AAPL MSFT
+  python fundamental_analysis/Beneish_Mscore.py --index sp500 --limit 10
+""",
+    )
+    parser.add_argument("--index", choices=["sp500", "nasdaq100"], default="sp500", help="Index universe to use when running in index mode.")
+    parser.add_argument("--tickers", nargs="+", help="One or more Yahoo Finance ticker symbols. Overrides --index.")
+    parser.add_argument("--limit", type=int, help="Maximum number of index tickers to process.")
     return parser.parse_args()
 
 

@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from utils import extract_close_prices, fetch_index_tickers, yahoo_symbol
+from utils import RichHelpFormatter, extract_close_prices, fetch_index_tickers, yahoo_symbol
 
 
 def fetch_price_data(tickers: list[str], start_date: dt.datetime, end_date: dt.datetime) -> pd.DataFrame:
@@ -173,20 +173,44 @@ def monte_carlo_best_weights(
 def parse_args() -> argparse.Namespace:
     """Parse command-line options for portfolio optimization."""
 
-    parser = argparse.ArgumentParser(description="Optimize a long-only equity portfolio.")
+    parser = argparse.ArgumentParser(
+        description="Optimize a long-only equity portfolio for maximum Sharpe ratio.",
+        formatter_class=RichHelpFormatter,
+        epilog="""
+Inputs:
+  --tickers accepts one or more Yahoo Finance symbols, e.g. AAPL MSFT NVDA.
+  --index accepts one of: sp500, nasdaq100.
+  --selection accepts one of: low_volatility, high_return, random.
+  --risk-free-rate, --min-weight, and --max-weight are decimals.
+
+Data used:
+  This is a price time-series model. It uses historical daily log returns and
+  annualized covariance over the selected number of years.
+
+Optimization:
+  Uses SciPy SLSQP when installed.
+  Falls back to Monte Carlo random search if SciPy is unavailable.
+  Weights are constrained to sum to 1.
+
+Examples:
+  python portfolio_analysis/portfolio_optimization.py
+  python portfolio_analysis/portfolio_optimization.py --tickers AAPL MSFT NVDA GOOGL --max-weight 0.4
+  python portfolio_analysis/portfolio_optimization.py --index sp500 --selection low_volatility --top-n 10 --limit 50
+""",
+    )
 
     # Defaults make the script runnable from VS Code without arguments.
-    parser.add_argument("--index", choices=["sp500", "nasdaq100"], default="sp500")
-    parser.add_argument("--tickers", nargs="+", help="Ticker symbols to analyze. Overrides --index selection.")
-    parser.add_argument("--selection", choices=["low_volatility", "high_return", "random"], default="low_volatility")
-    parser.add_argument("--top-n", type=int, default=10)
-    parser.add_argument("--years", type=int, default=5)
-    parser.add_argument("--risk-free-rate", type=float, default=0.02)
-    parser.add_argument("--min-weight", type=float, default=0.0)
-    parser.add_argument("--max-weight", type=float, default=0.4)
-    parser.add_argument("--limit", type=int, help="Limit index tickers before downloading prices.")
-    parser.add_argument("--fallback-simulations", type=int, default=10000)
-    parser.add_argument("--no-plot", action="store_true")
+    parser.add_argument("--index", choices=["sp500", "nasdaq100"], default="sp500", help="Index universe to use when running in index mode.")
+    parser.add_argument("--tickers", nargs="+", help="One or more Yahoo Finance ticker symbols. Overrides --index selection.")
+    parser.add_argument("--selection", choices=["low_volatility", "high_return", "random"], default="low_volatility", help="How to select tickers from an index universe.")
+    parser.add_argument("--top-n", type=int, default=10, help="Number of selected index tickers to optimize.")
+    parser.add_argument("--years", type=int, default=5, help="Number of years of historical price data.")
+    parser.add_argument("--risk-free-rate", type=float, default=0.02, help="Annual risk-free rate used in Sharpe ratio, as a decimal.")
+    parser.add_argument("--min-weight", type=float, default=0.0, help="Minimum allocation per asset, as a decimal.")
+    parser.add_argument("--max-weight", type=float, default=0.4, help="Maximum allocation per asset, as a decimal.")
+    parser.add_argument("--limit", type=int, help="Maximum number of index tickers to download before selection.")
+    parser.add_argument("--fallback-simulations", type=int, default=10000, help="Random-search attempts if SciPy is unavailable or optimization fails.")
+    parser.add_argument("--no-plot", action="store_true", help="Print output only and do not open a matplotlib chart.")
     return parser.parse_args()
 
 

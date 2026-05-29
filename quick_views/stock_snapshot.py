@@ -28,7 +28,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from utils import extract_close_prices, yahoo_symbol
+from utils import RichHelpFormatter, extract_close_prices, yahoo_symbol
 
 
 def build_stock_snapshot(
@@ -112,13 +112,35 @@ def plot_snapshot(normalized: pd.DataFrame, summary: pd.DataFrame) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Create a quick visual snapshot for one or more stocks.")
+    parser = argparse.ArgumentParser(
+        description="Create a quick price-performance snapshot for one or more stocks.",
+        formatter_class=RichHelpFormatter,
+        epilog="""
+Inputs:
+  --tickers accepts one or more Yahoo Finance symbols, e.g. AAPL MSFT NVDA.
+  --start-date and --end-date use YYYY-MM-DD format.
+  Leave --end-date empty to use the latest available market data.
+
+Data used:
+  This is a price time-series view. It downloads historical close prices and
+  normalizes every stock to 100 on the first date so performance is comparable.
+
+Printed metrics:
+  first_close, latest_close, total period return, annualized volatility,
+  maximum drawdown, period high, and period low.
+
+Examples:
+  python quick_views/stock_snapshot.py
+  python quick_views/stock_snapshot.py --tickers AAPL MSFT NVDA GOOGL
+  python quick_views/stock_snapshot.py --tickers AAPL MSFT --start-date 2023-01-01 --no-plot
+""",
+    )
 
     # Defaults make the script useful by simply pressing Run Python File in VS Code.
-    parser.add_argument("--tickers", nargs="+", default=["AAPL", "MSFT", "NVDA", "GOOGL"])
-    parser.add_argument("--start-date", default="2024-01-01")
-    parser.add_argument("--end-date")
-    parser.add_argument("--no-plot", action="store_true")
+    parser.add_argument("--tickers", nargs="+", default=["AAPL", "MSFT", "NVDA", "GOOGL"], help="One or more Yahoo Finance ticker symbols.")
+    parser.add_argument("--start-date", default="2024-01-01", help="Start date for the price time series, in YYYY-MM-DD format.")
+    parser.add_argument("--end-date", help="Optional end date for the price time series, in YYYY-MM-DD format.")
+    parser.add_argument("--no-plot", action="store_true", help="Print output only and do not open a matplotlib chart.")
     return parser.parse_args()
 
 

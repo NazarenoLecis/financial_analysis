@@ -20,7 +20,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from technical_analysis.indicators import bollinger_bands
-from utils import fetch_price_history
+from utils import RichHelpFormatter, fetch_price_history
 
 
 def analyze_bollinger(ticker: str, start_date: str, end_date: str | None, window: int, num_std: float):
@@ -69,15 +69,37 @@ def plot_bollinger(ticker: str, analysis) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Calculate and chart Bollinger bands.")
+    parser = argparse.ArgumentParser(
+        description="Calculate and chart Bollinger Bands for a stock price time series.",
+        formatter_class=RichHelpFormatter,
+        epilog="""
+Inputs:
+  --ticker accepts one Yahoo Finance symbol, e.g. AAPL.
+  --start-date and --end-date use YYYY-MM-DD format.
+  --window is the moving-average period used for the middle band.
+  --num-std controls how many standard deviations define the upper/lower bands.
+
+Data used:
+  This is a price time-series script. It uses daily close prices from yfinance.
+
+Interpretation:
+  The printed "Latest Bollinger status" only describes the most recent close:
+  above upper band, below lower band, or inside bands.
+
+Examples:
+  python technical_analysis/bollinger_bands.py
+  python technical_analysis/bollinger_bands.py --ticker MSFT --window 20 --num-std 2
+  python technical_analysis/bollinger_bands.py --ticker AAPL --start-date 2023-01-01 --no-plot
+""",
+    )
 
     # Defaults make the file runnable from VS Code with no command-line inputs.
-    parser.add_argument("--ticker", default="AAPL")
-    parser.add_argument("--start-date", default="2020-01-01")
-    parser.add_argument("--end-date")
-    parser.add_argument("--window", type=int, default=20)
-    parser.add_argument("--num-std", type=float, default=2.0)
-    parser.add_argument("--no-plot", action="store_true")
+    parser.add_argument("--ticker", default="AAPL", help="Yahoo Finance ticker symbol.")
+    parser.add_argument("--start-date", default="2020-01-01", help="Start date for price history, in YYYY-MM-DD format.")
+    parser.add_argument("--end-date", help="Optional end date for price history, in YYYY-MM-DD format.")
+    parser.add_argument("--window", type=int, default=20, help="Rolling window for the middle band.")
+    parser.add_argument("--num-std", type=float, default=2.0, help="Number of standard deviations for upper/lower bands.")
+    parser.add_argument("--no-plot", action="store_true", help="Print output only and do not open a matplotlib chart.")
     return parser.parse_args()
 
 

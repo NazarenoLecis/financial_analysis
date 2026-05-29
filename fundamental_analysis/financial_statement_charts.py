@@ -20,7 +20,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from utils import fetch_financial_data, statement_series
+from utils import RichHelpFormatter, fetch_financial_data, statement_series
 
 
 def build_statement_frame(ticker: str) -> pd.DataFrame:
@@ -92,11 +92,32 @@ def plot_statement_charts(ticker: str, frame: pd.DataFrame) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Chart annual financial statements for a ticker.")
+    parser = argparse.ArgumentParser(
+        description="Print and chart annual financial statement time series.",
+        formatter_class=RichHelpFormatter,
+        epilog="""
+Inputs:
+  --ticker accepts one Yahoo Finance symbol, e.g. AAPL.
+
+Data used:
+  This is a time-series script. It uses annual income statement, cash flow, and
+  balance sheet values from yfinance.
+
+Printed table:
+  Rows are fiscal years.
+  Columns are major statement lines such as revenue, net income, free cash flow,
+  total assets, total liabilities, and stockholders equity.
+
+Examples:
+  python fundamental_analysis/financial_statement_charts.py
+  python fundamental_analysis/financial_statement_charts.py --ticker MSFT
+  python fundamental_analysis/financial_statement_charts.py --ticker AAPL --no-plot
+""",
+    )
 
     # Defaults make this script work from VS Code without command-line options.
-    parser.add_argument("--ticker", default="AAPL")
-    parser.add_argument("--no-plot", action="store_true")
+    parser.add_argument("--ticker", default="AAPL", help="Yahoo Finance ticker symbol.")
+    parser.add_argument("--no-plot", action="store_true", help="Print output only and do not open a matplotlib chart.")
     return parser.parse_args()
 
 
