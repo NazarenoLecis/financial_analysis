@@ -1,103 +1,131 @@
+import argparse
+from datetime import datetime
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import yfinance as yf
-import matplotlib.pyplot as plt
-from datetime import datetime
-import requests
-from bs4 import BeautifulSoup
+
+from utils import extract_close_prices, fetch_index_tickers, yahoo_symbol
 
 
-# Function to fetch the list of S&P 500 stocks from Wikipedia
-def get_sp500_stocks():
-    url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, 'html.parser')
-    table = soup.find('table', {'id': 'constituents'})
-    tickers = [row.find_all('td')[0].text.strip() for row in table.find_all('tr')[1:]]
-    return tickers
+def run_simulation(
+    tickers: list[str],
+    start_date: str,
+    end_date: str,
+    simulations: int,
+    risk_free_rate: float,
+    seed: int,
+) -> pd.DataFrame:
+    """Generate random long-only portfolios and return their risk/return metrics."""
+
+    yahoo_tickers = [yahoo_symbol(ticker) for ticker in tickers]
+    downloaded = yf.download(yahoo_tickers, start=start_date, end=end_date, progress=False)
+    prices = extract_close_prices(downloaded, yahoo_tickers).sort_index()
+    returns = prices.pct_change(fill_method=None).dropna()
+
+    if returns.empty:
+        raise ValueError("Not enough price data to calculate returns")
+
+    rng = np.random.default_rng(seed)
+    num_stocks = len(prices.columns)
+    mean_daily_returns = returns.mean()
+    cov_matrix = returns.cov()
+    results = np.zeros((3 + num_stocks, simulations))
+
+    # Each simulation creates weights that sum to 1, then annualizes return and volatility.
+    for i in range(simulations):
+        weights = rng.random(num_stocks)
+        weights /= np.sum(weights)
+
+        portfolio_return = np.sum(mean_daily_returns * weights) * 252
+        portfolio_std_dev = np.sqrt(weights.T @ cov_matrix @ weights) * np.sqrt(252)
+        sharpe_ratio = (portfolio_return - risk_free_rate) / portfolio_std_dev
+
+        results[0, i] = portfolio_return
+        results[1, i] = portfolio_std_dev
+        results[2, i] = sharpe_ratio
+        results[3:, i] = weights
+
+    columns = ["return", "volatility", "sharpe"] + prices.columns.tolist()
+    return pd.DataFrame(results.T, columns=columns)
 
 
-# Fetch the list of S&P 500 stocks
-sp500_stocks = get_sp500_stocks()
+def plot_results(results: pd.DataFrame) -> None:
+    """Plot the simulated portfolios and highlight the best Sharpe/min-volatility portfolios."""
 
-# Select a random subset of stocks (e.g., 4 stocks)
-np.random.seed(42)  # For reproducibility
-num_stocks = 4
-stocks = np.random.choice(sp500_stocks, num_stocks, replace=False).tolist()
+    max_sharpe_port = results.iloc[results["sharpe"].idxmax()]
+    min_vol_port = results.iloc[results["volatility"].idxmin()]
 
-print(f"Selected Stocks: {stocks}")
+    plt.scatter(results.volatility, results["return"], c=results.sharpe, cmap="RdYlBu")
+    plt.xlabel("Volatility")
+    plt.ylabel("Returns")
+    plt.colorbar(label="Sharpe Ratio")
+    plt.scatter(
+        max_sharpe_port["volatility"],
+        max_sharpe_port["return"],
+        marker=(5, 1, 0),
+        color="r",
+        s=100,
+        label="Max Sharpe Ratio",
+    )
+    plt.scatter(
+        min_vol_port["volatility"],
+        min_vol_port["return"],
+        marker=(5, 1, 0),
+        color="g",
+        s=100,
+        label="Min Volatility",
+    )
+    plt.legend()
+    plt.show()
 
-# Download daily adjusted closing prices for selected stocks
-start_date = '2010-01-01'
-end_date = datetime.today().strftime('%Y-%m-%d')
-data = yf.download(stocks, start=start_date, end=end_date)['Adj Close']
-data.sort_index(inplace=True)  # Ensure data is sorted by date
 
-# Convert daily prices into daily returns
-returns = data.pct_change()
+def parse_args() -> argparse.Namespace:
+    """Parse command-line options for reproducible portfolio simulations."""
 
-# Calculate the mean daily returns and the covariance matrix of daily returns
-mean_daily_returns = returns.mean()
-cov_matrix = returns.cov()
+    parser = argparse.ArgumentParser(description="Run a Monte Carlo portfolio simulation.")
+    parser.add_argument("--index", choices=["sp500", "nasdaq100"], default="sp500")
+    parser.add_argument("--tickers", nargs="+", help="Ticker symbols to analyze. Overrides random selection.")
+    parser.add_argument("--num-stocks", type=int, default=4, help="Random stock count when --tickers is omitted.")
+    parser.add_argument("--start-date", default="2010-01-01")
+    parser.add_argument("--end-date", default=datetime.today().strftime("%Y-%m-%d"))
+    parser.add_argument("--simulations", type=int, default=25000)
+    parser.add_argument("--risk-free-rate", type=float, default=0.0)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--no-plot", action="store_true")
+    return parser.parse_args()
 
-# Set the number of simulations for the Monte Carlo approach
-num_portfolios = 25000
 
-# Initialize an array to store results (returns, volatility, Sharpe ratio, and weights)
-results = np.zeros((3 + num_stocks, num_portfolios))
+def main() -> None:
+    args = parse_args()
+    if args.tickers:
+        tickers = args.tickers
+    else:
+        # Choose a reproducible random subset when no explicit tickers are provided.
+        rng = np.random.default_rng(args.seed)
+        tickers = rng.choice(fetch_index_tickers(args.index), args.num_stocks, replace=False).tolist()
 
-# Run the simulation for the given number of portfolios
-for i in range(num_portfolios):
-    # Randomly generate portfolio weights
-    weights = np.random.random(num_stocks)
+    results = run_simulation(
+        tickers=tickers,
+        start_date=args.start_date,
+        end_date=args.end_date,
+        simulations=args.simulations,
+        risk_free_rate=args.risk_free_rate,
+        seed=args.seed,
+    )
+    max_sharpe_port = results.iloc[results["sharpe"].idxmax()]
+    min_vol_port = results.iloc[results["volatility"].idxmin()]
 
-    # Normalize weights to ensure they sum to 1
-    weights /= np.sum(weights)
+    print("Selected stocks:", ", ".join(tickers))
+    print("\nPortfolio with maximum Sharpe ratio:")
+    print(max_sharpe_port)
+    print("\nPortfolio with minimum volatility:")
+    print(min_vol_port)
 
-    # Calculate portfolio return (annualized)
-    portfolio_return = np.sum(mean_daily_returns * weights) * 252
+    if not args.no_plot:
+        plot_results(results)
 
-    # Calculate portfolio volatility (annualized standard deviation)
-    portfolio_std_dev = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights))) * np.sqrt(252)
 
-    # Store results in the results array
-    results[0, i] = portfolio_return  # Portfolio return
-    results[1, i] = portfolio_std_dev  # Portfolio standard deviation (volatility)
-    results[2, i] = results[0, i] / results[1, i]  # Sharpe ratio (excluding risk-free rate)
-
-    # Store the weights of each stock in the results array
-    results[3:, i] = weights
-
-# Convert the results array into a Pandas DataFrame for easier analysis
-columns = ['ret', 'stdev', 'sharpe'] + stocks
-results_frame = pd.DataFrame(results.T, columns=columns)
-
-# Identify the portfolio with the maximum Sharpe Ratio
-max_sharpe_port = results_frame.iloc[results_frame['sharpe'].idxmax()]
-
-# Identify the portfolio with the minimum standard deviation (volatility)
-min_vol_port = results_frame.iloc[results_frame['stdev'].idxmin()]
-
-# Create a scatter plot of portfolios colored by Sharpe Ratio
-plt.scatter(results_frame.stdev, results_frame.ret, c=results_frame.sharpe, cmap='RdYlBu')
-plt.xlabel('Volatility')  # X-axis: Portfolio volatility (risk)
-plt.ylabel('Returns')  # Y-axis: Portfolio returns
-plt.colorbar(label='Sharpe Ratio')  # Color bar to indicate Sharpe Ratio levels
-
-# Highlight the portfolio with the maximum Sharpe Ratio (red star)
-plt.scatter(max_sharpe_port['stdev'], max_sharpe_port['ret'], marker=(5, 1, 0), color='r', s=100,
-            label='Max Sharpe Ratio')
-
-# Highlight the portfolio with the minimum volatility (green star)
-plt.scatter(min_vol_port['stdev'], min_vol_port['ret'], marker=(5, 1, 0), color='g', s=100, label='Min Volatility')
-
-# Add a legend and display the plot
-plt.legend()
-plt.show()
-
-# Display the selected stocks, max Sharpe portfolio, and min volatility portfolio
-print("Selected Stocks:", stocks)
-print("\nPortfolio with Maximum Sharpe Ratio:")
-print(max_sharpe_port)
-print("\nPortfolio with Minimum Volatility:")
-print(min_vol_port)
+if __name__ == "__main__":
+    main()

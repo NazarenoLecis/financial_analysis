@@ -1,149 +1,167 @@
-import yfinance as yf
-import pandas as pd
+import argparse
+
+from utils import fetch_financial_data, fetch_index_tickers, require_periods, safe_divide, statement_value
 
 
-# Fetch financial data for a given ticker
-def fetch_financial_data(ticker):
-    stock = yf.Ticker(ticker)
-    balance_sheet = stock.balance_sheet
-    income_statement = stock.income_stmt
-    cash_flow = stock.cash_flow
-    years = balance_sheet.columns  # Financial years
-    return [balance_sheet, income_statement, cash_flow, years]
+def calculate_profitability(data) -> int:
+    """Score the four Piotroski profitability signals."""
+
+    current, previous = data.periods[0], data.periods[1]
+
+    net_income = statement_value(data.income_statement, current, "Net Income")
+    net_income_previous = statement_value(data.income_statement, previous, "Net Income")
+    operating_cash_flow = statement_value(
+        data.cash_flow,
+        current,
+        ["Operating Cash Flow", "Total Cash From Operating Activities"],
+    )
+    total_assets = statement_value(data.balance_sheet, current, "Total Assets")
+    total_assets_previous = statement_value(data.balance_sheet, previous, "Total Assets")
+
+    roa = safe_divide(net_income, total_assets, "current ROA")
+    roa_previous = safe_divide(net_income_previous, total_assets_previous, "previous ROA")
+
+    positive_roa_score = int(roa > 0)
+    positive_cash_flow_score = int(operating_cash_flow > 0)
+    roa_improvement_score = int(roa > roa_previous)
+    accruals_score = int(operating_cash_flow > net_income)
+
+    return positive_roa_score + positive_cash_flow_score + roa_improvement_score + accruals_score
 
 
-# Calculate profitability score
-def calculate_profitability(data):
-    balance_sheet, income_statement, cash_flow, years = data
+def calculate_leverage_liquidity_and_dilution(data) -> int:
+    """Score leverage reduction, liquidity improvement, and lack of share dilution."""
 
-    net_income = income_statement[years[0]]['Net Income']
-    net_income_previous_year = income_statement[years[1]]['Net Income']
-    profit_score = 1 if net_income > net_income_previous_year else 0
+    current, previous = data.periods[0], data.periods[1]
 
-    free_cash_flow = cash_flow[years[0]]['Free Cash Flow']
-    cash_flow_score = 1 if free_cash_flow > 0 else 0
+    long_term_debt = statement_value(data.balance_sheet, current, "Long Term Debt", required=False, default=0)
+    long_term_debt_previous = statement_value(data.balance_sheet, previous, "Long Term Debt", required=False, default=0)
+    debt_score = int(long_term_debt <= long_term_debt_previous)
 
-    total_assets = balance_sheet[years[0]]['Total Assets']
-    total_assets_previous_year = balance_sheet[years[1]]['Total Assets']
-    roa = net_income / total_assets
-    roa_previous_year = net_income_previous_year / total_assets_previous_year
-    roa_score = 1 if roa > roa_previous_year else 0
+    current_assets = statement_value(data.balance_sheet, current, ["Current Assets", "Total Current Assets"])
+    current_liabilities = statement_value(
+        data.balance_sheet,
+        current,
+        ["Current Liabilities", "Total Current Liabilities"],
+    )
+    current_assets_previous = statement_value(
+        data.balance_sheet,
+        previous,
+        ["Current Assets", "Total Current Assets"],
+    )
+    current_liabilities_previous = statement_value(
+        data.balance_sheet,
+        previous,
+        ["Current Liabilities", "Total Current Liabilities"],
+    )
+    current_ratio = safe_divide(current_assets, current_liabilities, "current ratio")
+    current_ratio_previous = safe_divide(
+        current_assets_previous,
+        current_liabilities_previous,
+        "previous current ratio",
+    )
+    current_ratio_score = int(current_ratio > current_ratio_previous)
 
-    accruals = free_cash_flow / total_assets
-    accruals_score = 1 if accruals > roa else 0
-
-    return profit_score + cash_flow_score + roa_score + accruals_score
-
-
-# Calculate leverage and liquidity score
-def calculate_leverage(data):
-    balance_sheet, _, _, years = data
-
-    try:
-        long_term_debt = balance_sheet[years[0]]['Long Term Debt']
-        long_term_debt_previous_year = balance_sheet[years[1]]['Long Term Debt']
-        debt_score = 1 if long_term_debt < long_term_debt_previous_year else 0
-    except KeyError:
-        debt_score = 1
-
-    current_assets = balance_sheet[years[0]]['Current Assets']
-    current_liabilities = balance_sheet[years[0]]['Current Liabilities']
-    current_ratio = current_assets / current_liabilities
-
-    current_assets_previous_year = balance_sheet[years[1]]['Current Assets']
-    current_liabilities_previous_year = balance_sheet[years[1]]['Current Liabilities']
-    current_ratio_previous_year = current_assets_previous_year / current_liabilities_previous_year
-    current_ratio_score = 1 if current_ratio > current_ratio_previous_year else 0
-
-    shares_issued = balance_sheet[years[0]]['Share Issued']
-    shares_issued_previous_year = balance_sheet[years[1]]['Share Issued']
-    dilution_score = 1 if shares_issued <= shares_issued_previous_year else 0
+    shares = statement_value(
+        data.balance_sheet,
+        current,
+        ["Ordinary Shares Number", "Share Issued", "Common Stock Shares Outstanding"],
+    )
+    shares_previous = statement_value(
+        data.balance_sheet,
+        previous,
+        ["Ordinary Shares Number", "Share Issued", "Common Stock Shares Outstanding"],
+    )
+    dilution_score = int(shares <= shares_previous)
 
     return debt_score + current_ratio_score + dilution_score
 
 
-# Calculate operational efficiency score
-def calculate_operational_efficiency(data):
-    balance_sheet, income_statement, _, years = data
+def calculate_operational_efficiency(data) -> int:
+    """Score gross margin and asset turnover improvements."""
 
-    try:
-        ebitda = income_statement[years[0]]['EBITDA']
-        ebitda_previous_year = income_statement[years[1]]['EBITDA']
-    except KeyError:
-        ebitda = income_statement[years[0]]['Net Income']
-        ebitda_previous_year = income_statement[years[1]]['Net Income']
+    current, previous, two_years_ago = data.periods[0], data.periods[1], data.periods[2]
 
-    gross_margin_score = 1 if ebitda > ebitda_previous_year else 0
+    sales = statement_value(data.income_statement, current, ["Total Revenue", "Revenue"])
+    sales_previous = statement_value(data.income_statement, previous, ["Total Revenue", "Revenue"])
+    cost_of_revenue = statement_value(data.income_statement, current, ["Cost Of Revenue", "Cost Of Goods Sold"])
+    cost_of_revenue_previous = statement_value(
+        data.income_statement,
+        previous,
+        ["Cost Of Revenue", "Cost Of Goods Sold"],
+    )
 
-    total_assets = balance_sheet[years[0]]['Total Assets']
-    total_assets_previous_year = balance_sheet[years[1]]['Total Assets']
-    average_assets = (total_assets + total_assets_previous_year) / 2
-    revenue = income_statement[years[0]]['Total Revenue']
-    asset_turnover = revenue / average_assets
+    gross_margin = safe_divide(sales - cost_of_revenue, sales, "current gross margin")
+    gross_margin_previous = safe_divide(
+        sales_previous - cost_of_revenue_previous,
+        sales_previous,
+        "previous gross margin",
+    )
+    gross_margin_score = int(gross_margin > gross_margin_previous)
 
-    total_assets_two_years_ago = balance_sheet[years[2]]['Total Assets']
-    average_assets_previous_year = (total_assets_previous_year + total_assets_two_years_ago) / 2
-    revenue_previous_year = income_statement[years[1]]['Total Revenue']
-    asset_turnover_previous_year = revenue_previous_year / average_assets_previous_year
-
-    asset_turnover_score = 1 if asset_turnover > asset_turnover_previous_year else 0
+    total_assets = statement_value(data.balance_sheet, current, "Total Assets")
+    total_assets_previous = statement_value(data.balance_sheet, previous, "Total Assets")
+    total_assets_two_years_ago = statement_value(data.balance_sheet, two_years_ago, "Total Assets")
+    average_assets = (total_assets + total_assets_previous) / 2
+    average_assets_previous = (total_assets_previous + total_assets_two_years_ago) / 2
+    asset_turnover = safe_divide(sales, average_assets, "current asset turnover")
+    asset_turnover_previous = safe_divide(
+        sales_previous,
+        average_assets_previous,
+        "previous asset turnover",
+    )
+    asset_turnover_score = int(asset_turnover > asset_turnover_previous)
 
     return gross_margin_score + asset_turnover_score
 
 
-# Calculate the Piotroski F-score for a given stock ticker
-def calculate_piotroski_score(ticker):
+def calculate_piotroski_score(ticker: str) -> int:
+    """Calculate the full 0-9 Piotroski F-score for one ticker."""
+
     data = fetch_financial_data(ticker)
-    profitability_score = calculate_profitability(data)
-    leverage_score = calculate_leverage(data)
-    efficiency_score = calculate_operational_efficiency(data)
-    return profitability_score + leverage_score + efficiency_score
+    require_periods(data, 3)
+    return (
+        calculate_profitability(data)
+        + calculate_leverage_liquidity_and_dilution(data)
+        + calculate_operational_efficiency(data)
+    )
 
 
-# Fetch the list of tickers for S&P 500 and Nasdaq-100
-def fetch_sp500_tickers():
-    sp500_data = pd.read_html('https://en.wikipedia.org/wiki/List_of_S%26P_500_companies')[0]
-    return sp500_data.Symbol.tolist()
+def parse_args() -> argparse.Namespace:
+    """Parse command-line options for batch or single-ticker scoring."""
+
+    parser = argparse.ArgumentParser(description="Calculate Piotroski F-scores.")
+    parser.add_argument("--index", choices=["sp500", "nasdaq100"], default="sp500")
+    parser.add_argument("--tickers", nargs="+", help="Ticker symbols to analyze. Overrides --index.")
+    parser.add_argument("--limit", type=int, help="Limit the number of tickers processed.")
+    return parser.parse_args()
 
 
-def fetch_nasdaq100_tickers():
-    nasdaq100_data = pd.read_html('https://en.wikipedia.org/wiki/Nasdaq-100')[4]
-    return nasdaq100_data.Symbol.tolist()
+def main() -> None:
+    args = parse_args()
+    tickers = args.tickers or fetch_index_tickers(args.index)
+    if args.limit:
+        tickers = tickers[: args.limit]
 
+    results: dict[str, int] = {}
+    errors: dict[str, str] = {}
 
-# Main function
-def main():
-    print("Choose the index for analysis:")
-    print("1. S&P 500")
-    print("2. Nasdaq-100")
-    choice = input("Enter the number corresponding to your choice: ")
-
-    if choice == "1":
-        tickers = fetch_sp500_tickers()
-        print("You selected the S&P 500.")
-    elif choice == "2":
-        tickers = fetch_nasdaq100_tickers()
-        print("You selected the Nasdaq-100.")
-    else:
-        print("Invalid choice. Exiting.")
-        return
-
-    results = {}
-    errors = {}
-
+    # Continue through the list even if a company is missing a required field.
     for ticker in tickers:
         try:
             f_score = calculate_piotroski_score(ticker)
             results[ticker] = f_score
-            print(f"The Piotroski F-score for {ticker} is {f_score}")
-        except Exception as e:
-            errors[ticker] = e
-            print(f"Failed to calculate the Piotroski F-score for {ticker}. Error: {e}")
+            print(f"{ticker}: Piotroski F-score = {f_score}")
+        except Exception as exc:
+            errors[ticker] = str(exc)
+            print(f"{ticker}: failed ({exc})")
 
-    print("\nCalculation complete.")
-    print("Results:", results)
+    print("\nPiotroski F-score results:")
+    for ticker, f_score in results.items():
+        print(f"{ticker}: {f_score}")
+
     if errors:
-        print("\nErrors occurred for the following tickers:")
+        print("\nErrors:")
         for ticker, error in errors.items():
             print(f"{ticker}: {error}")
 

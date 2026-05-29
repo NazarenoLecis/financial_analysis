@@ -1,163 +1,199 @@
+import argparse
+import datetime as dt
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import datetime as dt
 import yfinance as yf
-from scipy.optimize import minimize
-import matplotlib.pyplot as plt
 
-# Fetch S&P 500 tickers dynamically
-def fetch_sp500_tickers():
-    """
-    Fetch the list of S&P 500 companies from Wikipedia.
-
-    Returns:
-        list: A list of ticker symbols.
-    """
-    url = 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
-    sp500_table = pd.read_html(url)[0]
-    return sp500_table['Symbol'].tolist()
-
-# Fetch adjusted closing prices for selected tickers
-def fetch_price_data(tickers, start_date, end_date):
-    """
-    Fetch historical adjusted closing prices for a list of tickers.
-
-    Args:
-        tickers (list): List of stock ticker symbols.
-        start_date (datetime): Start date for historical data.
-        end_date (datetime): End date for historical data.
-
-    Returns:
-        DataFrame: Adjusted closing prices of the stocks.
-    """
-    adj_close_df = pd.DataFrame()
-    for ticker in tickers:
-        try:
-            data = yf.download(ticker, start=start_date, end=end_date)
-            adj_close_df[ticker] = data['Adj Close']
-        except Exception as e:
-            print(f"Failed to fetch data for {ticker}: {e}")
-    adj_close_df.dropna(axis=1, inplace=True)  # Drop columns with missing data
-    return adj_close_df
+from utils import extract_close_prices, fetch_index_tickers, yahoo_symbol
 
 
-# Calculate portfolio metrics
-def calculate_log_returns(adj_close_df):
-    """
-    Calculate log returns for a DataFrame of adjusted closing prices.
+def fetch_price_data(tickers: list[str], start_date: dt.datetime, end_date: dt.datetime) -> pd.DataFrame:
+    """Download close prices for a group of tickers in one yfinance request."""
 
-    Args:
-        adj_close_df (DataFrame): Adjusted closing prices.
+    yahoo_tickers = [yahoo_symbol(ticker) for ticker in tickers]
+    downloaded = yf.download(yahoo_tickers, start=start_date, end=end_date, progress=False)
+    prices = extract_close_prices(downloaded, yahoo_tickers)
+    return prices.dropna(axis=1, how="any")
 
-    Returns:
-        DataFrame: Log returns of the stocks.
-    """
-    return np.log(adj_close_df / adj_close_df.shift(1)).dropna()
 
-def portfolio_std_dev(weights, cov_matrix):
+def calculate_log_returns(prices: pd.DataFrame) -> pd.DataFrame:
+    """Convert price levels into daily log returns."""
+
+    return np.log(prices / prices.shift(1)).dropna()
+
+
+def portfolio_std_dev(weights: np.ndarray, cov_matrix: pd.DataFrame) -> float:
+    """Calculate annualized portfolio volatility from weights and covariance."""
+
     variance = weights.T @ cov_matrix @ weights
-    return np.sqrt(variance)
+    return float(np.sqrt(variance))
 
-def portfolio_expected_return(weights, log_returns):
-    return np.sum(log_returns.mean() * weights) * 252
 
-def portfolio_sharpe_ratio(weights, log_returns, cov_matrix, risk_free_rate):
-    return (portfolio_expected_return(weights, log_returns) - risk_free_rate) / portfolio_std_dev(weights, cov_matrix)
+def portfolio_expected_return(weights: np.ndarray, log_returns: pd.DataFrame) -> float:
+    """Calculate annualized expected return from historical mean log returns."""
 
-# Select tickers dynamically based on criteria
-def select_tickers(adj_close_df, log_returns, method='low_volatility', top_n=10):
-    """
-    Select tickers dynamically based on specified criteria.
+    return float(np.sum(log_returns.mean() * weights) * 252)
 
-    Args:
-        adj_close_df (DataFrame): Adjusted closing prices.
-        log_returns (DataFrame): Log returns of the stocks.
-        method (str): Selection criteria ('low_volatility', 'high_return', 'random').
-        top_n (int): Number of tickers to select.
 
-    Returns:
-        list: Selected tickers.
-    """
-    if method == 'low_volatility':
+def portfolio_sharpe_ratio(
+    weights: np.ndarray,
+    log_returns: pd.DataFrame,
+    cov_matrix: pd.DataFrame,
+    risk_free_rate: float,
+) -> float:
+    """Calculate the Sharpe ratio after subtracting the chosen risk-free rate."""
+
+    volatility = portfolio_std_dev(weights, cov_matrix)
+    return (portfolio_expected_return(weights, log_returns) - risk_free_rate) / volatility
+
+
+def select_tickers(log_returns: pd.DataFrame, method: str = "low_volatility", top_n: int = 10) -> list[str]:
+    """Choose a smaller investable universe before optimizing the portfolio."""
+
+    if top_n > len(log_returns.columns):
+        raise ValueError(f"top_n={top_n} exceeds available assets ({len(log_returns.columns)})")
+
+    if method == "low_volatility":
         volatility = log_returns.std() * np.sqrt(252)
-        selected_tickers = volatility.nsmallest(top_n).index.tolist()
-    elif method == 'high_return':
+        return volatility.nsmallest(top_n).index.tolist()
+    if method == "high_return":
         mean_returns = log_returns.mean() * 252
-        selected_tickers = mean_returns.nlargest(top_n).index.tolist()
-    elif method == 'random':
-        selected_tickers = adj_close_df.columns.to_list()
-        selected_tickers = np.random.choice(selected_tickers, top_n, replace=False).tolist()
-    else:
-        raise ValueError("Invalid selection method. Choose 'low_volatility', 'high_return', or 'random'.")
-    return selected_tickers
+        return mean_returns.nlargest(top_n).index.tolist()
+    if method == "random":
+        return np.random.choice(log_returns.columns.to_list(), top_n, replace=False).tolist()
+    raise ValueError("Invalid selection method. Choose 'low_volatility', 'high_return', or 'random'.")
 
-# Optimize portfolio
-def optimize_portfolio(log_returns, cov_matrix, risk_free_rate, bounds=(0, 0.4)):
+
+def optimize_portfolio(
+    log_returns: pd.DataFrame,
+    cov_matrix: pd.DataFrame,
+    risk_free_rate: float,
+    weight_bounds: tuple[float, float] = (0, 0.4),
+    fallback_simulations: int = 10000,
+) -> tuple[np.ndarray, str]:
+    """Optimize weights with SciPy when available, otherwise use a random search fallback."""
+
+    try:
+        from scipy.optimize import minimize
+    except ImportError:
+        return monte_carlo_best_weights(log_returns, cov_matrix, risk_free_rate, weight_bounds, fallback_simulations), "monte_carlo"
+
     num_assets = len(log_returns.columns)
-    initial_weights = np.array([1 / num_assets] * num_assets)  # Equal weights initially
+    initial_weights = np.array([1 / num_assets] * num_assets)
+    constraints = {"type": "eq", "fun": lambda weights: np.sum(weights) - 1}
+    bounds = [weight_bounds for _ in range(num_assets)]
 
-    # Constraints
-    constraints = {'type': 'eq', 'fun': lambda weights: np.sum(weights) - 1}  # Weights must sum to 1
-    bounds = [(bounds[0], bounds[1]) for _ in range(num_assets)]  # No short selling, max allocation per asset
-
-    # Perform optimization to maximize Sharpe Ratio
     optimized_results = minimize(
         lambda weights: -portfolio_sharpe_ratio(weights, log_returns, cov_matrix, risk_free_rate),
         initial_weights,
-        method='SLSQP',
+        method="SLSQP",
         bounds=bounds,
-        constraints=constraints
+        constraints=constraints,
     )
 
-    if not optimized_results.success:
-        raise ValueError("Optimization failed: " + optimized_results.message)
+    if optimized_results.success:
+        return optimized_results.x, "scipy_slsqp"
 
-    return optimized_results.x
+    return monte_carlo_best_weights(log_returns, cov_matrix, risk_free_rate, weight_bounds, fallback_simulations), "monte_carlo"
 
-# Main program
-if __name__ == "__main__":
-    # Step 1: Fetch S&P 500 tickers
-    all_tickers = fetch_sp500_tickers()
 
-    # Step 2: Fetch historical price data
+def monte_carlo_best_weights(
+    log_returns: pd.DataFrame,
+    cov_matrix: pd.DataFrame,
+    risk_free_rate: float,
+    weight_bounds: tuple[float, float],
+    simulations: int,
+) -> np.ndarray:
+    """Search random portfolios for the highest Sharpe ratio within weight bounds."""
+
+    rng = np.random.default_rng(42)
+    num_assets = len(log_returns.columns)
+    lower, upper = weight_bounds
+    best_weights = np.array([1 / num_assets] * num_assets)
+    best_sharpe = portfolio_sharpe_ratio(best_weights, log_returns, cov_matrix, risk_free_rate)
+
+    for _ in range(simulations):
+        weights = rng.random(num_assets)
+        weights /= weights.sum()
+        if np.any(weights < lower) or np.any(weights > upper):
+            continue
+        sharpe = portfolio_sharpe_ratio(weights, log_returns, cov_matrix, risk_free_rate)
+        if sharpe > best_sharpe:
+            best_sharpe = sharpe
+            best_weights = weights
+
+    return best_weights
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse command-line options for portfolio optimization."""
+
+    parser = argparse.ArgumentParser(description="Optimize a long-only equity portfolio.")
+    parser.add_argument("--index", choices=["sp500", "nasdaq100"], default="sp500")
+    parser.add_argument("--tickers", nargs="+", help="Ticker symbols to analyze. Overrides --index selection.")
+    parser.add_argument("--selection", choices=["low_volatility", "high_return", "random"], default="low_volatility")
+    parser.add_argument("--top-n", type=int, default=10)
+    parser.add_argument("--years", type=int, default=5)
+    parser.add_argument("--risk-free-rate", type=float, default=0.02)
+    parser.add_argument("--min-weight", type=float, default=0.0)
+    parser.add_argument("--max-weight", type=float, default=0.4)
+    parser.add_argument("--limit", type=int, help="Limit index tickers before downloading prices.")
+    parser.add_argument("--fallback-simulations", type=int, default=10000)
+    parser.add_argument("--no-plot", action="store_true")
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    all_tickers = args.tickers or fetch_index_tickers(args.index)
+    if args.limit:
+        all_tickers = all_tickers[: args.limit]
+
     end_date = dt.datetime.today()
-    start_date = end_date - dt.timedelta(days=5 * 365)  # 5 years of data
-    adj_close_df = fetch_price_data(all_tickers, start_date, end_date)
+    start_date = end_date - dt.timedelta(days=args.years * 365)
+    prices = fetch_price_data(all_tickers, start_date, end_date)
+    log_returns = calculate_log_returns(prices)
 
-    # Step 3: Calculate log returns
-    log_returns = calculate_log_returns(adj_close_df)
-    cov_matrix = log_returns.cov() * 252  # Annualized covariance matrix
-
-    # Step 4: Dynamically select top tickers (e.g., based on low volatility)
-    selected_tickers = select_tickers(adj_close_df, log_returns, method='low_volatility', top_n=10)
-    print(f"Selected Tickers: {selected_tickers}")
-
-    # Filter data for selected tickers
+    # Explicit tickers are used directly; otherwise select the best candidates from the index.
+    selected_tickers = [yahoo_symbol(ticker) for ticker in args.tickers] if args.tickers else select_tickers(
+        log_returns,
+        method=args.selection,
+        top_n=args.top_n,
+    )
     log_returns = log_returns[selected_tickers]
     cov_matrix = log_returns.cov() * 252
 
-    # Step 5: Optimize portfolio
-    risk_free_rate = 0.02
-    optimal_weights = optimize_portfolio(log_returns, cov_matrix, risk_free_rate, bounds=(0, 0.4))
+    optimal_weights, method = optimize_portfolio(
+        log_returns,
+        cov_matrix,
+        args.risk_free_rate,
+        weight_bounds=(args.min_weight, args.max_weight),
+        fallback_simulations=args.fallback_simulations,
+    )
 
-    # Calculate portfolio metrics
-    optimal_portfolio_return = portfolio_expected_return(optimal_weights, log_returns)
-    optimal_portfolio_volatility = portfolio_std_dev(optimal_weights, cov_matrix)
-    optimal_sharpe_ratio = portfolio_sharpe_ratio(optimal_weights, log_returns, cov_matrix, risk_free_rate)
+    portfolio_return = portfolio_expected_return(optimal_weights, log_returns)
+    volatility = portfolio_std_dev(optimal_weights, cov_matrix)
+    sharpe_ratio = portfolio_sharpe_ratio(optimal_weights, log_returns, cov_matrix, args.risk_free_rate)
 
-    # Step 6: Print and visualize results
-    print("\nOptimal Portfolio Weights:")
+    print(f"Optimization method: {method}")
+    print("\nOptimal portfolio weights:")
     for ticker, weight in zip(selected_tickers, optimal_weights):
         print(f"{ticker}: {weight:.4f}")
 
-    print(f"\nExpected Annual Return: {optimal_portfolio_return:.4f}")
-    print(f"Expected Volatility: {optimal_portfolio_volatility:.4f}")
-    print(f"Sharpe Ratio: {optimal_sharpe_ratio:.4f}")
+    print(f"\nExpected annual return: {portfolio_return:.4f}")
+    print(f"Expected volatility: {volatility:.4f}")
+    print(f"Sharpe ratio: {sharpe_ratio:.4f}")
 
-    # Plot optimal weights
-    plt.figure(figsize=(10, 6))
-    plt.bar(selected_tickers, optimal_weights)
-    plt.xlabel('Assets')
-    plt.ylabel('Optimal Weights')
-    plt.title('Optimal Portfolio Weights')
-    plt.show()
+    if not args.no_plot:
+        plt.figure(figsize=(10, 6))
+        plt.bar(selected_tickers, optimal_weights)
+        plt.xlabel("Assets")
+        plt.ylabel("Optimal Weights")
+        plt.title("Optimal Portfolio Weights")
+        plt.show()
+
+
+if __name__ == "__main__":
+    main()

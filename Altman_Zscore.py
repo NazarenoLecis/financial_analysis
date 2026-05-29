@@ -1,96 +1,96 @@
-import yfinance as yf
-import pandas as pd
+import argparse
 
-# Fetch financial data for a given ticker
-def fetch_financial_data(ticker):
-    """
-  Fetch the balance sheet, income statement, and cash flow statement for a stock.
+from utils import fetch_financial_data, fetch_index_tickers, safe_divide, statement_value
 
-  Args:
-      ticker (str): Stock ticker symbol.
 
-  Returns:
-      list: A list containing:
-          - Balance sheet (DataFrame)
-          - Income statement (DataFrame)
-          - Cash flow statement (DataFrame)
-          - Columns representing the years of financial data
-  """
-    stock = yf.Ticker(ticker)
-    balance_sheet = stock.balance_sheet
-    income_statement = stock.income_stmt
-    cash_flow = stock.cash_flow
-    years = balance_sheet.columns  # Financial years
-    return [balance_sheet, income_statement, cash_flow, years]
+def market_cap(data) -> float:
+    """Fetch market capitalization, trying the lighter fast_info endpoint first."""
 
-# Calculate the Altman Z-Score for a given stock ticker
-def calculate_altman_z_score(ticker):
-    """
-    Calculate the Altman Z-Score for a stock.
+    try:
+        value = data.stock.fast_info.get("market_cap")
+    except Exception:
+        value = None
 
-    Args:
-        ticker (str): Stock ticker symbol.
+    if value is None:
+        value = data.stock.info.get("marketCap")
 
-    Returns:
-        float: Altman Z-Score.
-    """
+    if value is None:
+        raise ValueError(f"No market capitalization found for {data.ticker}")
+    return float(value)
+
+
+def calculate_altman_z_score(ticker: str) -> float:
+    """Calculate the original public-company Altman Z-score for one ticker."""
+
     data = fetch_financial_data(ticker)
-    balance_sheet, income_statement, cash_flow, years, stock = data
+    period = data.periods[0]
 
-    # Altman Z-Score components calculation
+    # Altman's five factors combine liquidity, retained earnings, profitability,
+    # market leverage, and asset turnover.
+    current_assets = statement_value(data.balance_sheet, period, ["Current Assets", "Total Current Assets"])
+    current_liabilities = statement_value(
+        data.balance_sheet,
+        period,
+        ["Current Liabilities", "Total Current Liabilities"],
+    )
+    total_assets = statement_value(data.balance_sheet, period, "Total Assets")
+    retained_earnings = statement_value(data.balance_sheet, period, "Retained Earnings")
+    ebit = statement_value(data.income_statement, period, ["EBIT", "Operating Income"])
+    total_liabilities = statement_value(
+        data.balance_sheet,
+        period,
+        ["Total Liabilities Net Minority Interest", "Total Liabilities", "Total Liab"],
+    )
+    sales = statement_value(data.income_statement, period, ["Total Revenue", "Revenue"])
 
-    # X1: Working Capital / Total Assets
-    try:
-        working_capital = balance_sheet.loc["Total Current Assets", years[0]] - balance_sheet.loc["Total Current Liabilities", years[0]]
-    except KeyError:
-        working_capital = balance_sheet.loc["Current Assets", years[0]] - balance_sheet.loc["Current Liabilities", years[0]]
-    
-    total_assets = balance_sheet.loc["Total Assets", years[0]]
-    x1 = working_capital / total_assets
+    working_capital = current_assets - current_liabilities
+    x1 = safe_divide(working_capital, total_assets, "working capital / total assets")
+    x2 = safe_divide(retained_earnings, total_assets, "retained earnings / total assets")
+    x3 = safe_divide(ebit, total_assets, "EBIT / total assets")
+    x4 = safe_divide(market_cap(data), total_liabilities, "market value of equity / total liabilities")
+    x5 = safe_divide(sales, total_assets, "sales / total assets")
 
-    # X2: Retained Earnings / Total Assets
-    retained_earnings = balance_sheet.loc["Retained Earnings", years[0]]
-    x2 = retained_earnings / total_assets
+    return 1.2 * x1 + 1.4 * x2 + 3.3 * x3 + 0.6 * x4 + x5
 
-    # X3: EBIT / Total Assets
-    ebit = income_statement.loc["EBIT", years[0]]
-    x3 = ebit / total_assets
 
-    # X4: Market Value of Equity / Total Liabilities
-    market_value_of_equity = stock.info['marketCap']
-    total_liabilities = balance_sheet.loc["Total Liabilities Net Minority Interest", years[0]]
-    x4 = market_value_of_equity / total_liabilities
+def parse_args() -> argparse.Namespace:
+    """Parse command-line options for batch or single-ticker scoring."""
 
-    # X5: Sales / Total Assets
-    sales = income_statement.loc["Total Revenue", years[0]]
-    x5 = sales / total_assets
+    parser = argparse.ArgumentParser(description="Calculate Altman Z-scores.")
+    parser.add_argument("--index", choices=["sp500", "nasdaq100"], default="sp500")
+    parser.add_argument("--tickers", nargs="+", help="Ticker symbols to analyze. Overrides --index.")
+    parser.add_argument("--limit", type=int, help="Limit the number of tickers processed.")
+    return parser.parse_args()
 
-    # Altman Z-Score calculation
-    z_score = 1.2 * x1 + 1.4 * x2 + 3.3 * x3 + 0.6 * x4 + 1.0 * x5
 
-    return z_score
+def main() -> None:
+    args = parse_args()
+    tickers = args.tickers or fetch_index_tickers(args.index)
+    if args.limit:
+        tickers = tickers[: args.limit]
 
-# Fetch the list of S&P 500 companies from an alternative source
-sp500_tickers = pd.read_html('https://en.wikipedia.org/wiki/List_of_S%26P_500_companies')[0]['Symbol'].tolist()
+    results: dict[str, float] = {}
+    errors: dict[str, str] = {}
 
-results = {}
-errors = {}
+    # Keep processing even when yfinance lacks a field for a specific company.
+    for ticker in tickers:
+        try:
+            z_score = calculate_altman_z_score(ticker)
+            results[ticker] = z_score
+            print(f"{ticker}: Altman Z-score = {z_score:.4f}")
+        except Exception as exc:
+            errors[ticker] = str(exc)
+            print(f"{ticker}: failed ({exc})")
 
-# Calculate the Altman Z-Score for each stock in the S&P 500
-for ticker in sp500_tickers:
-    try:
-        z_score = calculate_altman_z_score(ticker)
-        results[ticker] = z_score
-        print(f"The Altman Z-Score for {ticker} is {z_score}")
-    except Exception as e:
-        errors[ticker] = e
-        print(f"Failed to calculate the Altman Z-Score for {ticker}: {e}")
+    print("\nAltman Z-score results:")
+    for ticker, z_score in results.items():
+        print(f"{ticker}: {z_score:.4f}")
 
-# Print results and errors summary
-print("\nAltman Z-Scores:")
-for ticker, z_score in results.items():
-    print(f"{ticker}: {z_score}")
+    if errors:
+        print("\nErrors:")
+        for ticker, error in errors.items():
+            print(f"{ticker}: {error}")
 
-print("\nErrors:")
-for ticker, error in errors.items():
-    print(f"{ticker}: {error}")
+
+if __name__ == "__main__":
+    main()
