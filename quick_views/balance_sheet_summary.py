@@ -23,6 +23,7 @@ from typing import Any
 
 import matplotlib.pyplot as plt
 import pandas as pd
+from matplotlib.ticker import FuncFormatter
 
 # Add the project root to the import path so this file can be run directly from
 # VS Code while still importing utils.py from the parent folder.
@@ -31,6 +32,9 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from utils import RichHelpFormatter, fetch_financial_data, safe_divide, statement_series, statement_value
+
+
+USD_BILLION = 1_000_000_000
 
 
 BALANCE_SHEET_FIELDS = {
@@ -161,9 +165,13 @@ def plot_balance_sheet(ticker: str, history: pd.DataFrame, years: int) -> None:
         for column in ["Total Assets", "Total Liabilities", "Stockholders Equity"]
         if column in recent
     ]
-    recent[major_columns].plot(ax=axes[0], marker="o")
+    # Scale raw values to billions. This avoids hard-to-read scientific axis
+    # labels such as 1e11 and makes the unit clear for non-expert users.
+    (recent[major_columns] / USD_BILLION).plot(ax=axes[0], marker="o")
     axes[0].set_title(f"{ticker} Balance Sheet Structure")
-    axes[0].set_ylabel("USD")
+    axes[0].set_ylabel("USD billions")
+    axes[0].yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{value:,.0f}"))
+    axes[0].grid(True, axis="y", alpha=0.25)
 
     # Second chart: short-term liquidity items.
     liquidity_columns = [
@@ -171,9 +179,12 @@ def plot_balance_sheet(ticker: str, history: pd.DataFrame, years: int) -> None:
         for column in ["Current Assets", "Current Liabilities", "Cash And Short Term Investments", "Working Capital"]
         if column in recent
     ]
-    recent[liquidity_columns].plot(ax=axes[1], marker="o")
+    (recent[liquidity_columns] / USD_BILLION).plot(ax=axes[1], marker="o")
     axes[1].set_title("Liquidity View")
-    axes[1].set_ylabel("USD")
+    axes[1].set_ylabel("USD billions")
+    axes[1].yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{value:,.0f}"))
+    axes[1].axhline(0, color="black", linewidth=0.8)
+    axes[1].grid(True, axis="y", alpha=0.25)
 
     plt.tight_layout()
     plt.show()

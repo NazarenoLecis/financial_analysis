@@ -21,9 +21,12 @@ financial_analysis/
   quick_views/
     stock_snapshot.py
     balance_sheet_summary.py
+    company_financial_overview.py
     notebooks/
       stock_snapshot.ipynb
       balance_sheet_summary.ipynb
+      company_key_variables.ipynb
+      company_indicators.ipynb
   fundamental_analysis/
     Altman_Zscore.py
     Beneish_Mscore.py
@@ -79,14 +82,22 @@ Balance sheet summary:
 python quick_views/balance_sheet_summary.py --ticker AAPL
 ```
 
+Company financial overview:
+
+```powershell
+python quick_views/company_financial_overview.py --ticker AAPL --view variables
+python quick_views/company_financial_overview.py --ticker AAPL --view indicators
+```
+
 Interactive notebooks:
 
 ```powershell
 jupyter notebook quick_views/notebooks/stock_snapshot.ipynb
-jupyter notebook quick_views/notebooks/balance_sheet_summary.ipynb
+jupyter notebook quick_views/notebooks/company_key_variables.ipynb
+jupyter notebook quick_views/notebooks/company_indicators.ipynb
 ```
 
-You can also open the notebooks directly in VS Code. Edit the input cell, rerun the following cells, and the tables/charts update inline.
+You can also open the notebooks directly in VS Code. Edit the input cell, rerun the following cells, and the tables/charts update inline. The company key variables notebook shows accounting values in USD billions; the company indicators notebook shows margins, ROA, ROE, ROI/ROIC, liquidity ratios, debt ratios, and turnover ratios.
 
 ## Fundamental Analysis
 
