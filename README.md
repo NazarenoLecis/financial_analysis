@@ -1,6 +1,6 @@
 # Financial Analysis
 
-Python scripts for fundamental analysis, technical analysis, and portfolio analysis.
+Python scripts for quick stock/company views, fundamental analysis, technical analysis, and portfolio analysis.
 
 The project uses `yfinance` for market and financial statement data. Index constituents are scraped from Wikipedia with `requests` and `beautifulsoup4`, so `lxml` is not required.
 
@@ -18,6 +18,9 @@ python -m pip install -r requirements.txt
 ```text
 financial_analysis/
   utils.py
+  quick_views/
+    stock_snapshot.py
+    balance_sheet_summary.py
   fundamental_analysis/
     Altman_Zscore.py
     Beneish_Mscore.py
@@ -44,6 +47,22 @@ financial_analysis/
 Every runnable script has defaults, so pressing "Run Python File" in VS Code works without arguments. Single-company scripts default to `AAPL`; ratio analysis defaults to `AAPL MSFT`; portfolio scripts default to `AAPL MSFT NVDA GOOGL`.
 
 Use the command-line options below when you want different tickers, index samples, dates, assumptions, or no chart window.
+
+## Quick Views
+
+These scripts are for fast inspection rather than deeper modelling.
+
+Quick stock snapshot:
+
+```powershell
+python quick_views/stock_snapshot.py --tickers AAPL MSFT NVDA GOOGL
+```
+
+Balance sheet summary:
+
+```powershell
+python quick_views/balance_sheet_summary.py --ticker AAPL
+```
 
 ## Fundamental Analysis
 
