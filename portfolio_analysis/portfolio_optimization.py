@@ -1,5 +1,11 @@
 import argparse
 import datetime as dt
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -53,7 +59,7 @@ def select_tickers(log_returns: pd.DataFrame, method: str = "low_volatility", to
     """Choose a smaller investable universe before optimizing the portfolio."""
 
     if top_n > len(log_returns.columns):
-        raise ValueError(f"top_n={top_n} exceeds available assets ({len(log_returns.columns)})")
+        top_n = len(log_returns.columns)
 
     if method == "low_volatility":
         volatility = log_returns.std() * np.sqrt(252)
@@ -147,7 +153,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    all_tickers = args.tickers or fetch_index_tickers(args.index)
+    use_index = args.tickers is None and ("--index" in sys.argv or "--limit" in sys.argv)
+    all_tickers = fetch_index_tickers(args.index) if use_index else (args.tickers or ["AAPL", "MSFT", "NVDA", "GOOGL"])
     if args.limit:
         all_tickers = all_tickers[: args.limit]
 
@@ -157,11 +164,10 @@ def main() -> None:
     log_returns = calculate_log_returns(prices)
 
     # Explicit tickers are used directly; otherwise select the best candidates from the index.
-    selected_tickers = [yahoo_symbol(ticker) for ticker in args.tickers] if args.tickers else select_tickers(
-        log_returns,
-        method=args.selection,
-        top_n=args.top_n,
-    )
+    if args.tickers or not use_index:
+        selected_tickers = [yahoo_symbol(ticker) for ticker in all_tickers]
+    else:
+        selected_tickers = select_tickers(log_returns, method=args.selection, top_n=args.top_n)
     log_returns = log_returns[selected_tickers]
     cov_matrix = log_returns.cov() * 252
 

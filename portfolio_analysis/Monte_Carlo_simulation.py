@@ -1,5 +1,11 @@
 import argparse
+import sys
 from datetime import datetime
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -101,10 +107,12 @@ def main() -> None:
     args = parse_args()
     if args.tickers:
         tickers = args.tickers
-    else:
+    elif "--index" in sys.argv:
         # Choose a reproducible random subset when no explicit tickers are provided.
         rng = np.random.default_rng(args.seed)
         tickers = rng.choice(fetch_index_tickers(args.index), args.num_stocks, replace=False).tolist()
+    else:
+        tickers = ["AAPL", "MSFT", "NVDA", "GOOGL"][: args.num_stocks]
 
     results = run_simulation(
         tickers=tickers,

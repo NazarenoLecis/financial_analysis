@@ -116,7 +116,7 @@ def statement_value(
         aliases = [aliases]
 
     for alias in aliases:
-        if alias in statement.index:
+        if alias in statement.index and period in statement.columns:
             value = statement.loc[alias, period]
             if pd.notna(value):
                 return float(value)
@@ -125,6 +125,8 @@ def statement_value(
     for alias in aliases:
         label = normalized_index.get(_normalize_label(alias))
         if label is None:
+            continue
+        if period not in statement.columns:
             continue
         value = statement.loc[label, period]
         if pd.notna(value):
@@ -143,6 +145,38 @@ def safe_divide(numerator: float, denominator: float, label: str) -> float:
     return numerator / denominator
 
 
+def market_cap_from_stock(stock: yf.Ticker, ticker: str) -> float:
+    """Fetch market capitalization from fast_info first, then the slower info endpoint."""
+
+    try:
+        value = stock.fast_info.get("market_cap")
+    except Exception:
+        value = None
+
+    if value is None:
+        value = stock.info.get("marketCap")
+
+    if value is None:
+        raise ValueError(f"No market capitalization found for {ticker}")
+    return float(value)
+
+
+def shares_outstanding_from_stock(stock: yf.Ticker, ticker: str) -> float:
+    """Fetch shares outstanding for per-share valuation models."""
+
+    try:
+        value = stock.fast_info.get("shares")
+    except Exception:
+        value = None
+
+    if value is None:
+        value = stock.info.get("sharesOutstanding")
+
+    if value is None:
+        raise ValueError(f"No shares outstanding found for {ticker}")
+    return float(value)
+
+
 def extract_close_prices(downloaded: pd.DataFrame, tickers: list[str] | None = None) -> pd.DataFrame:
     """Extract adjusted close prices, falling back to close prices when yfinance omits them."""
 
@@ -159,6 +193,70 @@ def extract_close_prices(downloaded: pd.DataFrame, tickers: list[str] | None = N
             prices = prices.rename(columns={price_field: tickers[0]})
 
     return prices.dropna(axis=1, how="all")
+
+
+def fetch_price_history(
+    ticker: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    interval: str = "1d",
+) -> pd.DataFrame:
+    """Download OHLCV price history for one ticker."""
+
+    yahoo_ticker = yahoo_symbol(ticker)
+    data = yf.download(
+        yahoo_ticker,
+        start=start_date,
+        end=end_date,
+        interval=interval,
+        progress=False,
+        auto_adjust=False,
+        multi_level_index=False,
+    )
+    if data.empty:
+        raise ValueError(f"No price data returned for {ticker}")
+
+    if isinstance(data.columns, pd.MultiIndex):
+        data = _flatten_single_ticker_download(data, yahoo_ticker)
+
+    return data.dropna(how="all")
+
+
+def statement_series(
+    statement: pd.DataFrame,
+    periods: pd.Index,
+    aliases: str | Iterable[str],
+    *,
+    required: bool = False,
+) -> pd.Series:
+    """Build a time series from a financial statement row across available periods."""
+
+    values = [
+        statement_value(statement, period, aliases, required=required, default=pd.NA)
+        for period in periods
+    ]
+    series = pd.Series(values, index=pd.to_datetime(periods), dtype="Float64")
+    return series.sort_index()
+
+
+def period_labels(index: pd.Index) -> list[str]:
+    """Return readable year labels for statement chart x-axes."""
+
+    return [str(getattr(period, "year", period)) for period in index]
+
+
+def _flatten_single_ticker_download(data: pd.DataFrame, yahoo_ticker: str) -> pd.DataFrame:
+    if "Ticker" in data.columns.names:
+        return data.xs(yahoo_ticker, level="Ticker", axis=1, drop_level=True)
+
+    if yahoo_ticker in data.columns.get_level_values(-1):
+        return data.xs(yahoo_ticker, level=-1, axis=1, drop_level=True)
+
+    if yahoo_ticker in data.columns.get_level_values(0):
+        return data.xs(yahoo_ticker, level=0, axis=1, drop_level=True)
+
+    data.columns = data.columns.get_level_values(0)
+    return data
 
 
 def _normalize_label(label) -> str:

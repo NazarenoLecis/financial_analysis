@@ -1,4 +1,10 @@
 import argparse
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from utils import fetch_financial_data, fetch_index_tickers, require_periods, safe_divide, statement_value
 
@@ -137,7 +143,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    tickers = args.tickers or fetch_index_tickers(args.index)
+    use_index = args.tickers is None and ("--index" in sys.argv or "--limit" in sys.argv)
+    tickers = fetch_index_tickers(args.index) if use_index else (args.tickers or ["AAPL"])
     if args.limit:
         tickers = tickers[: args.limit]
 

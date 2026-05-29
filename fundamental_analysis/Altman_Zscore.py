@@ -1,22 +1,12 @@
 import argparse
+import sys
+from pathlib import Path
 
-from utils import fetch_financial_data, fetch_index_tickers, safe_divide, statement_value
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-
-def market_cap(data) -> float:
-    """Fetch market capitalization, trying the lighter fast_info endpoint first."""
-
-    try:
-        value = data.stock.fast_info.get("market_cap")
-    except Exception:
-        value = None
-
-    if value is None:
-        value = data.stock.info.get("marketCap")
-
-    if value is None:
-        raise ValueError(f"No market capitalization found for {data.ticker}")
-    return float(value)
+from utils import fetch_financial_data, fetch_index_tickers, market_cap_from_stock, safe_divide, statement_value
 
 
 def calculate_altman_z_score(ticker: str) -> float:
@@ -47,7 +37,11 @@ def calculate_altman_z_score(ticker: str) -> float:
     x1 = safe_divide(working_capital, total_assets, "working capital / total assets")
     x2 = safe_divide(retained_earnings, total_assets, "retained earnings / total assets")
     x3 = safe_divide(ebit, total_assets, "EBIT / total assets")
-    x4 = safe_divide(market_cap(data), total_liabilities, "market value of equity / total liabilities")
+    x4 = safe_divide(
+        market_cap_from_stock(data.stock, data.ticker),
+        total_liabilities,
+        "market value of equity / total liabilities",
+    )
     x5 = safe_divide(sales, total_assets, "sales / total assets")
 
     return 1.2 * x1 + 1.4 * x2 + 3.3 * x3 + 0.6 * x4 + x5
@@ -65,7 +59,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    tickers = args.tickers or fetch_index_tickers(args.index)
+    use_index = args.tickers is None and ("--index" in sys.argv or "--limit" in sys.argv)
+    tickers = fetch_index_tickers(args.index) if use_index else (args.tickers or ["AAPL"])
     if args.limit:
         tickers = tickers[: args.limit]
 
