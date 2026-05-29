@@ -1,7 +1,18 @@
+"""Piotroski F-score analysis.
+
+The Piotroski F-score is a 0 to 9 checklist for fundamental strength. It uses
+nine binary tests grouped into profitability, leverage/liquidity, and operating
+efficiency.
+
+Each signal returns 1 if the company passes and 0 if it does not. Higher scores
+generally indicate stronger fundamentals.
+"""
+
 import argparse
 import sys
 from pathlib import Path
 
+# Add the project root to the import path so direct execution can find utils.py.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -27,9 +38,17 @@ def calculate_profitability(data) -> int:
     roa = safe_divide(net_income, total_assets, "current ROA")
     roa_previous = safe_divide(net_income_previous, total_assets_previous, "previous ROA")
 
+    # Signal 1: positive return on assets.
     positive_roa_score = int(roa > 0)
+
+    # Signal 2: positive operating cash flow.
     positive_cash_flow_score = int(operating_cash_flow > 0)
+
+    # Signal 3: return on assets improved from the prior year.
     roa_improvement_score = int(roa > roa_previous)
+
+    # Signal 4: cash flow is greater than net income, which suggests earnings
+    # quality is supported by cash rather than accruals.
     accruals_score = int(operating_cash_flow > net_income)
 
     return positive_roa_score + positive_cash_flow_score + roa_improvement_score + accruals_score
@@ -40,10 +59,12 @@ def calculate_leverage_liquidity_and_dilution(data) -> int:
 
     current, previous = data.periods[0], data.periods[1]
 
+    # Signal 5: long-term debt did not increase.
     long_term_debt = statement_value(data.balance_sheet, current, "Long Term Debt", required=False, default=0)
     long_term_debt_previous = statement_value(data.balance_sheet, previous, "Long Term Debt", required=False, default=0)
     debt_score = int(long_term_debt <= long_term_debt_previous)
 
+    # Signal 6: current ratio improved. This is a simple liquidity test.
     current_assets = statement_value(data.balance_sheet, current, ["Current Assets", "Total Current Assets"])
     current_liabilities = statement_value(
         data.balance_sheet,
@@ -68,6 +89,8 @@ def calculate_leverage_liquidity_and_dilution(data) -> int:
     )
     current_ratio_score = int(current_ratio > current_ratio_previous)
 
+    # Signal 7: shares outstanding did not increase. New shares can dilute
+    # existing shareholders.
     shares = statement_value(
         data.balance_sheet,
         current,
@@ -97,6 +120,8 @@ def calculate_operational_efficiency(data) -> int:
         ["Cost Of Revenue", "Cost Of Goods Sold"],
     )
 
+    # Signal 8: gross margin improved. This means the company keeps more profit
+    # from each dollar of sales after direct costs.
     gross_margin = safe_divide(sales - cost_of_revenue, sales, "current gross margin")
     gross_margin_previous = safe_divide(
         sales_previous - cost_of_revenue_previous,
@@ -105,6 +130,8 @@ def calculate_operational_efficiency(data) -> int:
     )
     gross_margin_score = int(gross_margin > gross_margin_previous)
 
+    # Signal 9: asset turnover improved. This means the company generated more
+    # sales per dollar of assets.
     total_assets = statement_value(data.balance_sheet, current, "Total Assets")
     total_assets_previous = statement_value(data.balance_sheet, previous, "Total Assets")
     total_assets_two_years_ago = statement_value(data.balance_sheet, two_years_ago, "Total Assets")
@@ -125,6 +152,9 @@ def calculate_piotroski_score(ticker: str) -> int:
     """Calculate the full 0-9 Piotroski F-score for one ticker."""
 
     data = fetch_financial_data(ticker)
+
+    # Three balance-sheet periods are needed because asset turnover compares
+    # average assets for the current year and prior year.
     require_periods(data, 3)
     return (
         calculate_profitability(data)
@@ -145,6 +175,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+
+    # No arguments means run a quick default example for AAPL. Passing --index
+    # or --limit requests a batch run from Wikipedia index constituents.
     use_index = args.tickers is None and ("--index" in sys.argv or "--limit" in sys.argv)
     tickers = fetch_index_tickers(args.index) if use_index else (args.tickers or ["AAPL"])
     if args.limit:

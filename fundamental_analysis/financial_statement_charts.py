@@ -1,3 +1,13 @@
+"""Financial statement charts.
+
+This script pulls the main annual income statement, cash flow, and balance sheet
+lines for one company. It prints the data and can show three simple matplotlib
+charts.
+
+The goal is to help users visually inspect revenue, profits, cash generation,
+assets, liabilities, and equity over time.
+"""
+
 import argparse
 import sys
 from pathlib import Path
@@ -5,6 +15,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
+# Add project root to import path so direct file execution can import utils.py.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -19,6 +30,7 @@ def build_statement_frame(ticker: str) -> pd.DataFrame:
     periods = data.periods
 
     # Not every company reports every field with the same label, so these use aliases.
+    # Each column below becomes one line in the printed table and charts.
     frame = pd.DataFrame(
         {
             "Revenue": statement_series(data.income_statement, periods, ["Total Revenue", "Revenue"]),
@@ -44,12 +56,16 @@ def build_statement_frame(ticker: str) -> pd.DataFrame:
             ),
         }
     )
+    # Drop rows and columns that are fully empty. yfinance sometimes returns an
+    # extra year in one statement that does not exist in the others.
     return frame.dropna(axis=1, how="all").dropna(axis=0, how="all")
 
 
 def plot_statement_charts(ticker: str, frame: pd.DataFrame) -> None:
     """Show income, cash-flow, and balance-sheet charts for one company."""
 
+    # Use three panels so the user can compare related statement lines without
+    # putting every metric on one crowded chart.
     fig, axes = plt.subplots(3, 1, figsize=(11, 10), sharex=True)
     income_columns = [column for column in ["Revenue", "Gross Profit", "Operating Income", "Net Income"] if column in frame]
     cash_columns = [column for column in ["Operating Cash Flow", "Free Cash Flow"] if column in frame]
@@ -77,6 +93,8 @@ def plot_statement_charts(ticker: str, frame: pd.DataFrame) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Chart annual financial statements for a ticker.")
+
+    # Defaults make this script work from VS Code without command-line options.
     parser.add_argument("--ticker", default="AAPL")
     parser.add_argument("--no-plot", action="store_true")
     return parser.parse_args()

@@ -1,4 +1,13 @@
-"""Shared helpers for ticker scraping, yfinance data access, and safe calculations."""
+"""Shared helpers used by the analysis scripts.
+
+This file keeps common tasks in one place so the individual analysis scripts can
+focus on the finance logic. The helpers here handle practical details such as:
+
+- converting stock tickers to the format Yahoo Finance expects;
+- downloading financial statements and historical prices;
+- reading statement fields even when yfinance uses slightly different labels;
+- preventing silent division-by-zero mistakes in financial ratios.
+"""
 
 from dataclasses import dataclass
 from typing import Iterable
@@ -11,6 +20,8 @@ from bs4 import BeautifulSoup
 
 USER_AGENT = "financial-analysis/1.0"
 
+# Wikipedia is used only for index constituent lists. The actual market and
+# statement data comes from yfinance.
 INDEX_URLS = {
     "sp500": "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
     "nasdaq100": "https://en.wikipedia.org/wiki/Nasdaq-100",
@@ -31,12 +42,16 @@ class FinancialStatements:
 
 
 class MissingFinancialField(ValueError):
+    """Raised when a required financial statement row is not available."""
+
     pass
 
 
 def yahoo_symbol(ticker: str) -> str:
     """Convert index tickers such as BRK.B to Yahoo Finance symbols such as BRK-B."""
 
+    # Yahoo Finance writes share classes with a dash instead of a dot. For
+    # example, Berkshire Hathaway's BRK.B becomes BRK-B.
     return ticker.strip().replace(".", "-")
 
 
@@ -48,11 +63,15 @@ def fetch_index_tickers(index: str = "sp500") -> list[str]:
     except KeyError as exc:
         raise ValueError(f"Unknown index '{index}'. Choose one of: {', '.join(INDEX_URLS)}") from exc
 
+    # Use requests and BeautifulSoup instead of pandas.read_html. This avoids
+    # requiring lxml, which was the dependency that originally broke the scripts.
     response = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=20)
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
     for table in soup.find_all("table"):
+        # Different Wikipedia pages call the ticker column "Symbol" or "Ticker".
+        # We search the table headers so the function works for both pages.
         headers = [cell.get_text(strip=True).lower() for cell in table.find_all("th")]
         if "symbol" not in headers and "ticker" not in headers:
             continue
@@ -67,6 +86,7 @@ def fetch_index_tickers(index: str = "sp500") -> list[str]:
             if ticker:
                 tickers.append(ticker)
         if tickers:
+            # Return the first table that looks like a real ticker table.
             return tickers
 
     raise RuntimeError(f"Could not find ticker table at {url}")
@@ -77,6 +97,9 @@ def fetch_financial_data(ticker: str) -> FinancialStatements:
 
     yahoo_ticker = yahoo_symbol(ticker)
     stock = yf.Ticker(yahoo_ticker)
+
+    # yfinance returns pandas DataFrames where rows are accounting line items
+    # and columns are fiscal periods. The most recent period is usually column 0.
     balance_sheet = stock.balance_sheet
     income_statement = stock.income_stmt
     cash_flow = stock.cash_flow
@@ -115,12 +138,16 @@ def statement_value(
     if isinstance(aliases, str):
         aliases = [aliases]
 
+    # First try exact labels. This is fastest and keeps common cases simple.
     for alias in aliases:
         if alias in statement.index and period in statement.columns:
             value = statement.loc[alias, period]
             if pd.notna(value):
                 return float(value)
 
+    # If exact labels fail, try a normalized comparison. This catches small
+    # spelling and punctuation differences such as "Cost Of Revenue" vs
+    # "Cost of Revenue".
     normalized_index = {_normalize_label(label): label for label in statement.index}
     for alias in aliases:
         label = normalized_index.get(_normalize_label(alias))
@@ -133,6 +160,8 @@ def statement_value(
             return float(value)
 
     if required:
+        # A missing required field is better than a fake zero. Returning zero
+        # would make ratios look valid while quietly corrupting the analysis.
         raise MissingFinancialField(f"Missing field: {', '.join(aliases)}")
     return default
 
@@ -149,11 +178,13 @@ def market_cap_from_stock(stock: yf.Ticker, ticker: str) -> float:
     """Fetch market capitalization from fast_info first, then the slower info endpoint."""
 
     try:
+        # fast_info is quicker and usually enough for market cap.
         value = stock.fast_info.get("market_cap")
     except Exception:
         value = None
 
     if value is None:
+        # info is slower, but it sometimes has fields missing from fast_info.
         value = stock.info.get("marketCap")
 
     if value is None:
@@ -184,9 +215,12 @@ def extract_close_prices(downloaded: pd.DataFrame, tickers: list[str] | None = N
         raise ValueError("No price data returned from yfinance")
 
     if isinstance(downloaded.columns, pd.MultiIndex):
+        # MultiIndex columns appear when yfinance downloads several tickers at
+        # once. The first level is often price fields such as Close or Adj Close.
         price_field = "Adj Close" if "Adj Close" in downloaded.columns.get_level_values(0) else "Close"
         prices = downloaded[price_field]
     else:
+        # A single ticker usually returns plain columns.
         price_field = "Adj Close" if "Adj Close" in downloaded.columns else "Close"
         prices = downloaded[[price_field]].copy()
         if tickers and len(tickers) == 1:
@@ -210,6 +244,9 @@ def fetch_price_history(
         end=end_date,
         interval=interval,
         progress=False,
+        # Keep raw OHLCV columns. Technical indicators usually use Close and
+        # Volume, and keeping the original columns makes the output easier to
+        # understand for beginners.
         auto_adjust=False,
         multi_level_index=False,
     )
@@ -217,6 +254,8 @@ def fetch_price_history(
         raise ValueError(f"No price data returned for {ticker}")
 
     if isinstance(data.columns, pd.MultiIndex):
+        # Newer yfinance versions can return multi-level columns even for one
+        # ticker. Flatten that shape so scripts can use data["Close"].
         data = _flatten_single_ticker_download(data, yahoo_ticker)
 
     return data.dropna(how="all")
@@ -231,6 +270,8 @@ def statement_series(
 ) -> pd.Series:
     """Build a time series from a financial statement row across available periods."""
 
+    # This turns a statement row such as "Total Revenue" into a clean time
+    # series that can be printed or plotted.
     values = [
         statement_value(statement, period, aliases, required=required, default=pd.NA)
         for period in periods
@@ -246,6 +287,8 @@ def period_labels(index: pd.Index) -> list[str]:
 
 
 def _flatten_single_ticker_download(data: pd.DataFrame, yahoo_ticker: str) -> pd.DataFrame:
+    """Convert yfinance multi-level columns into simple OHLCV columns."""
+
     if "Ticker" in data.columns.names:
         return data.xs(yahoo_ticker, level="Ticker", axis=1, drop_level=True)
 
@@ -260,4 +303,6 @@ def _flatten_single_ticker_download(data: pd.DataFrame, yahoo_ticker: str) -> pd
 
 
 def _normalize_label(label) -> str:
+    """Normalize statement labels for loose matching."""
+
     return "".join(ch for ch in str(label).lower() if ch.isalnum())

@@ -1,9 +1,21 @@
+"""MACD technical analysis.
+
+MACD stands for Moving Average Convergence Divergence. It compares a fast
+exponential moving average with a slower one. The signal line is another moving
+average of the MACD line.
+
+When MACD is above the signal line, this script labels the latest status as
+bullish. When it is below, it labels the status as bearish.
+"""
+
 import argparse
 import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 
+# Add project root to import path so direct file execution can import utils.py
+# and the shared indicator functions.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -15,10 +27,16 @@ from utils import fetch_price_history
 def analyze_macd(ticker: str, start_date: str, end_date: str | None, fast: int, slow: int, signal: int):
     """Calculate MACD and identify whether momentum is positive or negative."""
 
+    # MACD is calculated from closing prices.
     prices = fetch_price_history(ticker, start_date, end_date)
     macd_frame = macd(prices["Close"], fast, slow, signal)
+
+    # Keep the close price together with MACD values so the printed table is
+    # easy to read.
     analysis = prices[["Close"]].join(macd_frame)
     latest = analysis.dropna().iloc[-1]
+
+    # Simple interpretation of the latest crossover relationship.
     status = "bullish" if latest["macd"] > latest["signal"] else "bearish"
     return analysis, status
 
@@ -26,12 +44,15 @@ def analyze_macd(ticker: str, start_date: str, end_date: str | None, fast: int, 
 def plot_macd(ticker: str, analysis) -> None:
     """Show price, MACD line, signal line, and histogram."""
 
+    # Price is shown above, MACD details below.
     fig, axes = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
     analysis["Close"].plot(ax=axes[0])
     axes[0].set_title(f"{ticker} Price")
     axes[0].set_ylabel("Price")
 
     analysis[["macd", "signal"]].plot(ax=axes[1])
+
+    # Histogram bars show the distance between the MACD line and signal line.
     axes[1].bar(analysis.index, analysis["histogram"], color="gray", alpha=0.4)
     axes[1].set_title("MACD")
     axes[1].set_ylabel("Value")
@@ -42,6 +63,8 @@ def plot_macd(ticker: str, analysis) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Calculate and chart MACD.")
+
+    # Defaults make the script runnable from VS Code without arguments.
     parser.add_argument("--ticker", default="AAPL")
     parser.add_argument("--start-date", default="2020-01-01")
     parser.add_argument("--end-date")
