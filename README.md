@@ -2,7 +2,7 @@
 
 Python scripts for quick stock/company views, fundamental analysis, technical analysis, and portfolio analysis.
 
-The project uses `yfinance` for market and financial statement data. Index constituents are scraped from Wikipedia with `requests` and `beautifulsoup4`, so `lxml` is not required.
+The project uses `yfinance` for market and financial statement data. Index constituents are scraped from Wikipedia with `requests` and `beautifulsoup4`.
 
 ## Setup
 
@@ -21,6 +21,9 @@ financial_analysis/
   quick_views/
     stock_snapshot.py
     balance_sheet_summary.py
+    notebooks/
+      stock_snapshot.ipynb
+      balance_sheet_summary.ipynb
   fundamental_analysis/
     Altman_Zscore.py
     Beneish_Mscore.py
@@ -75,6 +78,15 @@ Balance sheet summary:
 ```powershell
 python quick_views/balance_sheet_summary.py --ticker AAPL
 ```
+
+Interactive notebooks:
+
+```powershell
+jupyter notebook quick_views/notebooks/stock_snapshot.ipynb
+jupyter notebook quick_views/notebooks/balance_sheet_summary.ipynb
+```
+
+You can also open the notebooks directly in VS Code. Edit the input cell, rerun the following cells, and the tables/charts update inline.
 
 ## Fundamental Analysis
 
