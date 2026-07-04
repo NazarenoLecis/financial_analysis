@@ -1,1 +1,1 @@
-check
+This file was created during implementation validation.
