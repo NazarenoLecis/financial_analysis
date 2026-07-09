@@ -1,6 +1,6 @@
 # Financial Analysis
 
-Python scripts for quick stock/company views, fundamental analysis, technical analysis, and portfolio analysis.
+Python scripts for quick stock/company views, fundamental analysis, derivative pricing, technical analysis, and portfolio analysis.
 
 The project uses `yfinance` for market and financial statement data. Index constituents are scraped from Wikipedia with `requests` and `beautifulsoup4`.
 
@@ -36,6 +36,8 @@ financial_analysis/
     dupont_analysis.py
     dcf_valuation.py
     dividend_analysis.py
+  derivative_pricing/
+    option_pricing.py
   technical_analysis/
     indicators.py
     moving_averages.py
@@ -50,7 +52,7 @@ financial_analysis/
 
 ## Running From VS Code
 
-Every runnable script has defaults, so pressing "Run Python File" in VS Code works without arguments. Single-company scripts default to `AAPL`; ratio analysis defaults to `AAPL MSFT`; portfolio scripts default to `AAPL MSFT NVDA GOOGL`.
+Every runnable script has defaults, so pressing "Run Python File" in VS Code works without arguments. Single-company scripts default to `AAPL`; ratio analysis defaults to `AAPL MSFT`; derivative pricing defaults to an `AAPL` plain vanilla call option; portfolio scripts default to `AAPL MSFT NVDA GOOGL`.
 
 Use the command-line options below when you want different tickers, index samples, dates, assumptions, or no chart window.
 
@@ -62,6 +64,7 @@ Every runnable script has detailed command-line help:
 python technical_analysis/rsi_analysis.py --help
 python quick_views/stock_snapshot.py --help
 python portfolio_analysis/portfolio_optimization.py --help
+python derivative_pricing/option_pricing.py --help
 ```
 
 The help text explains accepted variables, possible values, defaults, date formats, examples, and whether the script uses latest financial statement values or historical time-series data.
@@ -140,6 +143,34 @@ Dividend history:
 python fundamental_analysis/dividend_analysis.py --ticker AAPL
 ```
 
+## Derivative Pricing
+
+The derivative pricing script covers plain vanilla equity options. It supports Black-Scholes pricing for European calls and puts, Cox-Ross-Rubinstein binomial trees for European and American options, Monte Carlo pricing for European options, and Black-Scholes implied volatility from a market option price.
+
+Use yfinance spot price and historical volatility:
+
+```powershell
+python derivative_pricing/option_pricing.py --ticker AAPL --strike 220 --maturity 0.5 --model all
+```
+
+Use manual assumptions:
+
+```powershell
+python derivative_pricing/option_pricing.py --spot 100 --strike 105 --volatility 0.20 --risk-free-rate 0.04 --model black-scholes
+```
+
+Price an American option with the binomial tree:
+
+```powershell
+python derivative_pricing/option_pricing.py --spot 100 --strike 105 --volatility 0.20 --style american --model binomial
+```
+
+Calculate implied volatility from an observed European option price:
+
+```powershell
+python derivative_pricing/option_pricing.py --spot 100 --strike 105 --volatility 0.20 --market-price 7.5
+```
+
 ## Technical Analysis
 
 Moving averages:
@@ -193,4 +224,5 @@ python portfolio_analysis/portfolio_optimization.py --tickers AAPL MSFT NVDA GOO
 - Yahoo Finance statement labels vary by company, so the code uses aliases and reports missing fields clearly.
 - S&P symbols such as `BRK.B` are converted to Yahoo Finance format such as `BRK-B`.
 - `scipy` is used for portfolio optimization when installed. If it is unavailable, the optimizer falls back to a Monte Carlo search.
+- Option pricing assumes constant rates, constant volatility, continuous dividend yield, and simplified risk-neutral dynamics.
 - This is educational analysis code, not investment advice.
